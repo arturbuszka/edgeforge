@@ -30,7 +30,7 @@ IInspector inspector;
 try
 {
     (detector, inspector) = DetectorFactory.Create(options.Detector);
-    Console.WriteLine($"Model  : {DetectorFactory.Describe(options.Detector)}");
+    Console.WriteLine($"Model  : {DetectorFactory.Describe(options.Detector, detector)}");
 }
 catch (Exception ex) when (ex is OnnxRuntimeException or FileNotFoundException)
 {

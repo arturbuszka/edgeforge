@@ -1,6 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- DirectML needs its native DLLs beside the binary. Without a RID the build
+         copies only the managed wrapper, ORT then loads whatever DirectML.dll the
+         system has - on this machine a 2022 build - and session creation dies with
+         an opaque AbiCustomRegistry / 0x80070057 error. SelfContained stays false:
+         we want the native assets, not a bundled runtime. -->
+    <RuntimeIdentifier Condition="'$(OS)' == 'Windows_NT'">win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />

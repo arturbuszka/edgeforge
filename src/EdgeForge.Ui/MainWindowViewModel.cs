@@ -57,9 +57,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _options = options;
         _source = options.Camera.Source;
-        _modelDescription = DetectorFactory.Describe(options.Detector);
-
+        // Create first, describe second: the description names the execution
+        // provider the session actually opened with, which is only known once it has.
         (_detector, var inspector) = DetectorFactory.Create(options.Detector);
+
+        _modelDescription = DetectorFactory.Describe(options.Detector, _detector);
 
         _writer = new FrameWriter(options.Capture)
         {

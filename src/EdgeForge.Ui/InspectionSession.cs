@@ -25,6 +25,23 @@ public sealed class InspectionSession : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _loop;
     private FrameSnapshot? _pending;
+
+    // Pixel buffers are recycled rather than allocated per frame. At 2560x1920
+    // BGRA a frame is ~19 MB, so at 10 fps a fresh array per frame is ~200 MB/s
+    // straight onto the large object heap - which is not compacted, so this turns
+    // into Gen2 collections that pause every thread including the UI one. The
+    // symptom is a frozen image while the pipeline reports healthy throughput.
+    //
+    // Three slots, not two. Latest-wins means the UI holds at most one snapshot,
+    // but nothing stops the capture thread from lapping it: with two buffers the
+    // producer returns to the one the UI is still copying out of, and the frame
+    // tears. A third gives a full extra frame of slack, which at ~55 ms inference
+    // against a ~2 ms blit is a margin the producer cannot realistically close.
+    // This is a race made vanishingly unlikely rather than excluded outright -
+    // excluding it needs the UI to hand buffers back, and that is a bigger change
+    // than a torn frame every few days of uptime is worth.
+    private readonly byte[]?[] _bufferPool = new byte[3][];
+    private int _nextBuffer;
     private Frame? _latestFrame;
     private IReadOnlyList<Detection> _latestDetections = [];
     private readonly Lock _snapshotGate = new();
@@ -186,7 +203,7 @@ public sealed class InspectionSession : IDisposable
         long dropped)
     {
         var size = BitmapBridge.RequiredBufferSize(frame);
-        var buffer = size > 0 ? new byte[size] : [];
+        var buffer = RentBuffer(size);
         var hasPixels = size > 0 && BitmapBridge.TryCopyBgra(frame, buffer, out _, out _);
 
         var snapshot = new FrameSnapshot(
@@ -211,6 +228,27 @@ public sealed class InspectionSession : IDisposable
         }
 
         SnapshotAvailable?.Invoke();
+    }
+
+    /// <summary>
+    /// A buffer of at least <paramref name="size"/> bytes from the two-slot pool,
+    /// grown only when the stream changes shape. Called on the capture thread only.
+    /// </summary>
+    private byte[] RentBuffer(int size)
+    {
+        if (size == 0) return [];
+
+        var slot = _nextBuffer;
+        _nextBuffer = (_nextBuffer + 1) % _bufferPool.Length;
+
+        var buffer = _bufferPool[slot];
+        if (buffer is null || buffer.Length != size)
+        {
+            buffer = new byte[size];
+            _bufferPool[slot] = buffer;
+        }
+
+        return buffer;
     }
 
     private void DiscardPending() => Interlocked.Exchange(ref _pending, null);

@@ -38,10 +38,18 @@ milestone, not a component to build all at once.
 | 4 AI | History reveals anomalies | not built yet |
 
 We are at level 2: a YOLOv8 model runs locally through ONNX Runtime behind
-`IVisionDetector`, and `CountInspector` turns its detections into an
-expected-versus-observed count. Deliberately without debouncing — that is a
+`IVisionDetector` — on the GPU via DirectML, falling back to the CPU when no
+DX12 device is available — and `PresenceInspector` turns its detections into a
+present-or-not reading. Deliberately without debouncing — that is a
 decision-layer concern that arrives with tracking, and until then we want the
 raw truth about detector quality.
+
+Presence rather than count, because the two scenes ask different questions. At
+the bowls the normal state is an empty frame, so `CountInspector`'s
+expected-versus-observed rule reports the ordinary as the exception. A coop with
+a known flock size is the opposite case, and `CountInspector` stays for it.
+Counting meals needs the transition between absent and present, which belongs
+with tracking in the decision layer.
 
 ## Principles
 

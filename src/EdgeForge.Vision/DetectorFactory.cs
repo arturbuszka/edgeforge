@@ -32,23 +32,51 @@ public static class DetectorFactory
             options.ScoreThreshold,
             options.NmsThreshold,
             options.ClassId,
-            options.ClassName);
+            options.ClassName,
+            options.ExecutionProvider,
+            options.GpuDeviceId);
 
-        var inspector = new CountInspector(
-            options.ExpectedCount,
-            options.ClassName);
+        // Presence, not count: at the bowls zero animals is the normal state, and
+        // CountInspector would mark almost every frame of the day Nok. See
+        // PresenceInspector; CountInspector remains for a known-population scene.
+        var inspector = new PresenceInspector(options.ClassName);
 
         return (detector, inspector);
     }
 
     /// <summary>One line describing the active model, for a status bar or console banner.</summary>
-    public static string Describe(DetectorOptions options)
+    /// <param name="detector">
+    /// The detector <see cref="Create"/> returned, if there is one. Passing it makes
+    /// the banner report the provider the session actually opened with rather than
+    /// the one that was asked for - the two differ whenever DirectML fell back to
+    /// the CPU, which is exactly when you want to know.
+    /// </param>
+    public static string Describe(DetectorOptions options, IVisionDetector? detector = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        return string.IsNullOrWhiteSpace(options.ModelPath)
-            ? "none (SampleDetector placeholder)"
-            : $"{options.ModelPath} ({options.NetSize}px, class {options.ClassId} " +
-              $"'{options.ClassName}', expecting {options.ExpectedCount})";
+        if (string.IsNullOrWhiteSpace(options.ModelPath))
+        {
+            return "none (SampleDetector placeholder)";
+        }
+
+        var provider = detector is OnnxVisionDetector onnx
+            ? onnx.ActiveProvider
+            : options.ExecutionProvider;
+
+        var line = $"{options.ModelPath} ({options.NetSize}px, class {options.ClassId} " +
+                   $"'{options.ClassName}', {provider})";
+
+        // Selecting the wrong GPU costs about 7x here and shows up as nothing but
+        // slowness, so say out loud what the alternatives were.
+        if (provider.StartsWith("directml", StringComparison.Ordinal)
+            && GpuAdapters.HasMultipleAdapters(out var adapters))
+        {
+            line += $"{Environment.NewLine}         GPUs present: {adapters}. " +
+                    $"Using adapter {options.GpuDeviceId}; if inference is slow, " +
+                    "try another Detector.GpuDeviceId.";
+        }
+
+        return line;
     }
 }

@@ -38,8 +38,44 @@ public sealed class DetectorOptions
     /// <summary>Domain name reported for detections of <see cref="ClassId"/>.</summary>
     public string ClassName { get; set; } = "cat";
 
-    /// <summary>Population the count rule expects to see in frame.</summary>
+    /// <summary>
+    /// Population a count rule expects to see in frame. Currently unread: the
+    /// bowls run <c>PresenceInspector</c>, where zero animals is the normal state
+    /// rather than a fault. It stays for <c>CountInspector</c>, which is the right
+    /// rule for a scene with a known, fixed population such as the coop.
+    /// </summary>
     public int ExpectedCount { get; set; } = 2;
+
+    /// <summary>
+    /// Where inference runs: "directml" for the GPU, "cpu" to force the CPU
+    /// provider. DirectML is the default because on this hardware it is roughly
+    /// four times faster and, more usefully, flat across model sizes - yolov8m
+    /// costs about what yolov8n does, so accuracy stops trading against latency.
+    /// Falls back to the CPU on its own if no DirectML device can be opened, so a
+    /// machine without a DX12 GPU still runs.
+    /// </summary>
+    public string ExecutionProvider { get; set; } = "directml";
+
+    /// <summary>
+    /// Which GPU DirectML should use, as a DXGI adapter index. Ignored when
+    /// <see cref="ExecutionProvider"/> is "cpu".
+    /// </summary>
+    /// <remarks>
+    /// This matters more than it looks on a laptop. Index 0 is not the fastest
+    /// adapter, it is whichever one DXGI enumerates first, and on a machine with
+    /// switchable graphics that is usually the integrated GPU. Measured here on a
+    /// Ryzen 3750H with a GTX 1660 Ti, yolov8m: adapter 0 (Radeon Vega 10) 193 ms,
+    /// adapter 1 (GTX 1660 Ti) 28 ms - a 7x difference from one integer.
+    /// The startup banner prints the index in use; if inference is far slower than
+    /// expected, try the other one before assuming anything else is wrong.
+    /// <para>
+    /// There is no reliable way to derive the right index automatically: DXGI
+    /// order does not match the order the adapters appear in the driver registry,
+    /// so a heuristic based on video memory picks confidently and wrongly. It stays
+    /// an explicit setting, and the banner warns when more than one GPU is present.
+    /// </para>
+    /// </remarks>
+    public int GpuDeviceId { get; set; }
 }
 
 /// <summary>

@@ -51,12 +51,13 @@ That is how the training set for telling individual animals apart gets built.
 ## Model
 
 The weights are **not** in this repo — `models/*.onnx` is ignored. Export
-YOLOv8n once, locally:
+once, locally. `yolov8m` is the default choice — see *Where inference runs*
+below for why the larger model is close to free on the GPU:
 
 ```bash
 pip install ultralytics
-yolo export model=yolov8n.pt format=onnx imgsz=640 opset=12
-mv yolov8n.onnx models/
+yolo export model=yolov8m.pt format=onnx imgsz=640 opset=12
+mv yolov8m.onnx models/
 ```
 
 Then point `Detector.ModelPath` at it in
@@ -72,7 +73,81 @@ count rule.
 `Detector.ClassId` is a COCO class index. 15 = cat, used during development
 because cats are indoors and always available; 14 = bird for the coop. Both run
 the identical code path, so retargeting is that number plus `ClassName` and
-nothing else. `Detector.ExpectedCount` is the population the count rule expects.
+nothing else.
+
+At the bowls the active rule is `PresenceInspector`: it reports whether the
+target class is in frame and treats an empty frame as normal, because for most
+of the day it is. `CountInspector` — which marks any count other than
+`Detector.ExpectedCount` as a fault — remains for a scene with a known, fixed
+population such as the coop; pointing it at the bowls fills the event log with
+the animals' own absence. `ExpectedCount` is read only by that rule, so it is
+currently unused.
+
+## Where inference runs
+
+`Detector.ExecutionProvider` is `directml` (GPU) or `cpu`. DirectML runs on any
+DX12 GPU with the stock driver — no CUDA Toolkit, no cuDNN. If no such device
+can be opened the detector falls back to the CPU on its own, so a machine
+without a GPU still runs; the startup banner names whichever provider actually
+opened, not the one that was asked for.
+
+`Detector.GpuDeviceId` picks the GPU by adapter index, and on a machine with
+switchable graphics it matters more than anything else in this file. Index 0 is
+not the fastest adapter — it is whichever one the driver enumerates first, which
+on a laptop is usually the integrated chip. Measured here, yolov8m, mean
+inference per frame:
+
+| Where | Latency | FPS |
+| ----- | ------- | --- |
+| CPU (Ryzen 7 3750H) | 952 ms | 1.1 |
+| DirectML, adapter 0 — Radeon Vega 10 | 215 ms | 4.6 |
+| DirectML, adapter 1 — GTX 1660 Ti | 41 ms | 22.9 |
+
+There is no reliable way to pick that index automatically: driver enumeration
+order and DirectML order are not the same — here the registry lists the GTX
+first while DirectML answers to it as index 1 — so a heuristic would choose
+confidently and wrongly. The banner lists every GPU it can see; if inference is
+slow, try the other index.
+
+The useful part of the GPU numbers is not the speedup. It is that GPU cost is
+roughly flat across model sizes — yolov8m costs about what yolov8n does — so
+accuracy stops trading against latency and the largest model is the sensible
+default. On the CPU that same choice costs about 5x.
+
+### The live viewer competes with the model for the GPU
+
+Running both the model and the window on the discrete card makes the preview
+freeze while the pipeline keeps reporting healthy throughput: inference occupies
+the GPU almost continuously, and the window renderer never gets scheduled. The
+statistics climb, `dets` updates, and the picture sits still — which looks like a
+rendering bug and is not one.
+
+The headless demo does not have this problem (no window, no contention), so
+`EdgeForge.Demo` is the honest place to measure detection throughput.
+
+For a usable live preview, give the two jobs different GPUs. In Windows:
+**Settings → System → Display → Graphics**, add `EdgeForge.Ui.exe`, set it to
+**Power saving** (the integrated GPU), then set `Detector.GpuDeviceId` to the
+discrete card. The window renders on the integrated chip, the model gets the
+discrete one, and neither waits on the other. Drawing one image and a few
+rectangles is well within what integrated graphics handle.
+
+Without that split, `GpuDeviceId: 0` (integrated) gives a smooth preview at
+~4.6 FPS — which is entirely adequate for counting meals, since a cat at a bowl
+stays there for tens of seconds.
+
+### Build details that are load-bearing
+
+The executables set `<RuntimeIdentifier>win-x64</RuntimeIdentifier>` with
+`SelfContained=false`, and `EdgeForge.Vision` copies `DirectML.dll` out of the
+`Microsoft.AI.DirectML` package explicitly. That package ships the DLL under
+`bin/x64-win/` rather than the `runtimes/win-x64/native/` layout the SDK copies
+automatically, and its own build targets do not flow past the project that
+references it directly. Without the copy, ONNX Runtime binds to the
+`DirectML.dll` in `System32` — on Windows 11 a 2022 build, far older than ORT
+expects — and session creation fails inside `AbiCustomRegistry` with
+`0x80070057`. The failure is silent in effect: the detector falls back to the
+CPU and merely runs slow. Check the banner if the numbers look wrong.
 
 ## Projects
 

@@ -7,7 +7,12 @@
     <ProjectReference Include="..\EdgeForge.Core\EdgeForge.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
+    <!-- DirectML, not the CPU package: it runs the model on any DX12 GPU with the
+         stock driver, no CUDA Toolkit to install. 1.24.4 is the newest stable
+         DirectML build - the CPU package is further ahead, but that is the whole
+         cost of a ~4x speedup here. The CPU provider still ships inside it and is
+         what DetectorOptions.ExecutionProvider="cpu" falls back to. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
     <!-- Managed bindings alone are not enough: without a native runtime package
          VideoCapture throws DllNotFoundException. Versions must match exactly. -->
@@ -15,5 +20,21 @@
                       Condition="'$(OS)' == 'Windows_NT'" />
     <PackageReference Include="OpenCvSharp4.official.runtime.linux-x64" Version="4.13.0.20260627"
                       Condition="'$(OS)' != 'Windows_NT'" />
+  </ItemGroup>
+  <!-- Microsoft.AI.DirectML ships its native DLL under bin/x64-win/, not the
+       runtimes/win-x64/native/ layout the SDK copies automatically. Its own
+       build/*.targets would copy it, but NuGet build targets apply only to the
+       project that references the package directly - this library - and do not
+       flow on to the executables. Left alone, ORT binds to the DirectML.dll in
+       System32, on Windows 11 a 2022 build far older than ORT 1.24 expects, and
+       session creation fails inside AbiCustomRegistry with 0x80070057.
+       Marking it CopyToOutputDirectory here puts it in this project's output and
+       carries it into every referencing project. The path comes from the property
+       the package itself defines, so the version is never written out twice. -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <None Include="$(Microsoft_AI_DirectML_Bin_Dir_Windows_x64)\DirectML.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="DirectML.dll"
+          Visible="false" />
   </ItemGroup>
 </Project>
