@@ -37,7 +37,11 @@ milestone, not a component to build all at once.
 | 3 MES | Events become process data | `IInspector` + `IInspectionAction` |
 | 4 AI | History reveals anomalies | not built yet |
 
-We are at level 1 with a placeholder for level 2.
+We are at level 2: a YOLOv8 model runs locally through ONNX Runtime behind
+`IVisionDetector`, and `CountInspector` turns its detections into an
+expected-versus-observed count. Deliberately without debouncing — that is a
+decision-layer concern that arrives with tracking, and until then we want the
+raw truth about detector quality.
 
 ## Principles
 

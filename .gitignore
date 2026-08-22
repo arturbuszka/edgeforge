@@ -480,3 +480,9 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Model weights: exported locally, never committed
+models/*.onnx
+
+# Frames written by the live viewer: training data, sometimes gigabytes of it
+captures/

@@ -1,8 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- BitmapBridge copies pixels straight off the Mat data pointer. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\EdgeForge.Core\EdgeForge.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
     <!-- Managed bindings alone are not enough: without a native runtime package
          VideoCapture throws DllNotFoundException. Versions must match exactly. -->

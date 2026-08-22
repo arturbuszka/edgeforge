@@ -1,20 +1,15 @@
 using System.Diagnostics;
 using EdgeForge.Core;
-using EdgeForge.Demo;
 using EdgeForge.Device;
 using EdgeForge.Runtime;
 using EdgeForge.Vision;
 using Microsoft.Extensions.Configuration;
+using Microsoft.ML.OnnxRuntime;
 
 Console.WriteLine("EDGEFORGE INSPECTION");
 Console.WriteLine("====================");
 Console.WriteLine("Local inspection pipeline prototype");
 Console.WriteLine();
-
-var pipeline = new InspectionPipeline(
-    new SampleDetector(),
-    new LabelInspector(),
-    new ConsoleInspectionAction());
 
 EdgeForgeOptions options;
 try
@@ -27,29 +22,59 @@ catch (Exception ex) when (ex is InvalidOperationException or FormatException)
     return 2;
 }
 
-// Precedence: CLI argument > environment > appsettings.json.
-var source = args.Length > 0 ? args[0] : options.Camera.Source;
-
-if (string.IsNullOrWhiteSpace(source))
+// Plain `new`, no container: the graph is three objects deep and naming them
+// here is more honest than registering them somewhere else. The detector pair
+// itself comes from DetectorFactory so the viewer builds the same graph.
+IVisionDetector detector;
+IInspector inspector;
+try
 {
-    await RunSyntheticAsync(pipeline);
-    return 0;
+    (detector, inspector) = DetectorFactory.Create(options.Detector);
+    Console.WriteLine($"Model  : {DetectorFactory.Describe(options.Detector)}");
+}
+catch (Exception ex) when (ex is OnnxRuntimeException or FileNotFoundException)
+{
+    // A missing or unreadable model is a configuration failure, not a crash.
+    Console.Error.WriteLine($"Model unavailable: {ex.Message}");
+    return 2;
 }
 
 try
 {
-    await RunCameraAsync(pipeline, source, options.Camera.Capacity);
-    return 0;
+    var pipeline = new InspectionPipeline(
+        detector,
+        inspector,
+        new ConsoleInspectionAction());
+
+    // Precedence: CLI argument > environment > appsettings.json.
+    var source = args.Length > 0 ? args[0] : options.Camera.Source;
+
+    if (string.IsNullOrWhiteSpace(source))
+    {
+        await RunSyntheticAsync(pipeline);
+        return 0;
+    }
+
+    try
+    {
+        await RunCameraAsync(pipeline, source, options.Camera.Capacity);
+        return 0;
+    }
+    catch (ArgumentException ex)
+    {
+        Console.Error.WriteLine($"Invalid source: {ex.Message}");
+        return 2;
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.Error.WriteLine($"Capture failed: {ex.Message}");
+        return 1;
+    }
 }
-catch (ArgumentException ex)
+finally
 {
-    Console.Error.WriteLine($"Invalid source: {ex.Message}");
-    return 2;
-}
-catch (InvalidOperationException ex)
-{
-    Console.Error.WriteLine($"Capture failed: {ex.Message}");
-    return 1;
+    // OnnxVisionDetector owns a native inference session.
+    (detector as IDisposable)?.Dispose();
 }
 
 // Runs with nothing connected, so the demo always has something to show.
@@ -146,6 +171,7 @@ static async Task RunCameraAsync(InspectionPipeline pipeline, string source, int
                 {
                     Console.WriteLine(
                         $"{frame.Id}  {result.Status,-7} {frame.Width}x{frame.Height}  " +
+                        $"dets {result.Detections.Count}  " +
                         $"queue {metrics.CaptureLatency.TotalMilliseconds:F1} ms  " +
                         $"infer {metrics.InferenceLatency.TotalMilliseconds:F1} ms  " +
                         $"total {metrics.TotalLatency.TotalMilliseconds:F1} ms" +

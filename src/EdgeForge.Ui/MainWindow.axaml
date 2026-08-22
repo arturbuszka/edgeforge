@@ -1,0 +1,168 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:EdgeForge.Ui"
+        x:Class="EdgeForge.Ui.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="EdgeForge — live inspection"
+        Width="1280" Height="800"
+        MinWidth="900" MinHeight="600"
+        Background="#12141A">
+
+  <Window.Styles>
+    <Style Selector="TextBlock.section">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="#7C89A0" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="Border.panel">
+      <Setter Property="Background" Value="#191C24" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Padding" Value="12" />
+    </Style>
+  </Window.Styles>
+
+  <DockPanel LastChildFill="True">
+
+    <!-- Source bar -->
+    <Border DockPanel.Dock="Top" Background="#191C24" Padding="12,10">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+        <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
+                   Margin="0,0,10,0" Foreground="#9AA6BC" />
+        <TextBox Grid.Column="1" Text="{Binding Source, Mode=TwoWay}"
+                 IsEnabled="{Binding IsIdle}"
+                 PlaceholderText="0  |  rtsp://user:pass@host:554/stream  |  samples/line.mp4"
+                 VerticalAlignment="Center" />
+        <Button Grid.Column="2" Content="Start" Command="{Binding StartCommand}"
+                Margin="10,0,0,0" Padding="18,6" />
+        <Button Grid.Column="3" Content="Stop" Command="{Binding StopCommand}"
+                Margin="6,0,0,0" Padding="18,6" />
+        <Button Grid.Column="4" Content="Snapshot" Command="{Binding SnapshotCommand}"
+                Margin="6,0,0,0" Padding="14,6" />
+        <CheckBox Grid.Column="5" Content="Auto-save"
+                  IsChecked="{Binding AutoSaveEnabled, Mode=TwoWay}"
+                  Margin="14,0,0,0" VerticalAlignment="Center" />
+      </Grid>
+    </Border>
+
+    <!-- Status bar -->
+    <Border DockPanel.Dock="Bottom" Background="#191C24" Padding="12,8">
+      <Grid ColumnDefinitions="Auto,Auto,*">
+        <Border Grid.Column="0" Background="{Binding StatusBrush}"
+                CornerRadius="3" Padding="10,3">
+          <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" Foreground="#0E1014" />
+        </Border>
+        <TextBlock Grid.Column="1" Text="{Binding ModelDescription}"
+                   Margin="12,0,0,0" VerticalAlignment="Center"
+                   Foreground="#7C89A0" TextTrimming="CharacterEllipsis" />
+      </Grid>
+    </Border>
+
+    <!-- Right rail: stats + log -->
+    <Border DockPanel.Dock="Right" Width="300" Background="#12141A" Padding="10,10,10,10">
+      <Grid RowDefinitions="Auto,Auto,*">
+
+        <Border Grid.Row="0" Classes="panel" Margin="0,0,0,10">
+          <StackPanel>
+            <TextBlock Classes="section" Text="LIVE" />
+
+            <!-- The headline number: how many animals are at the bowls now. -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+              <TextBlock Text="{Binding CatsOnScreenStat.Value}"
+                         FontSize="46" FontWeight="Bold" Foreground="#E8ECF4" />
+              <TextBlock Text="on screen" VerticalAlignment="Bottom"
+                         Margin="10,0,0,10" Foreground="#7C89A0" />
+            </StackPanel>
+
+            <ItemsControl ItemsSource="{Binding LiveStats}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:StatRow">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                    <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="#7C89A0" />
+                    <TextBlock Grid.Column="1" Text="{Binding Value}"
+                               Foreground="#E8ECF4" FontFamily="Consolas,monospace" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Classes="panel" Margin="0,0,0,10">
+          <StackPanel>
+            <TextBlock Classes="section" Text="PIPELINE" />
+            <ItemsControl ItemsSource="{Binding PerformanceStats}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:StatRow">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                    <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="#7C89A0" />
+                    <TextBlock Grid.Column="1" Text="{Binding Value}"
+                               Foreground="#E8ECF4" FontFamily="Consolas,monospace" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2" Classes="panel">
+          <DockPanel LastChildFill="True">
+            <TextBlock DockPanel.Dock="Top" Classes="section" Text="EVENTS" />
+            <ListBox ItemsSource="{Binding EventLog}" Background="Transparent"
+                     BorderThickness="0" FontFamily="Consolas,monospace" FontSize="11">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#9AA6BC" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+        </Border>
+      </Grid>
+    </Border>
+
+    <!-- Video + detection overlay -->
+    <Border Margin="10" Background="#08090C" CornerRadius="6" ClipToBounds="True">
+      <Grid Name="VideoHost">
+        <Image Name="Video" Source="{Binding FrameBitmap}" Stretch="Uniform" />
+
+        <!-- Keyed to the bitmap, not the run state: a finished file leaves its last
+             frame on screen, and covering it with "No signal" would be a lie. -->
+        <TextBlock Text="No signal — set a source and press Start"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Foreground="#3A4152" FontSize="15"
+                   IsVisible="{Binding !HasVideo}" />
+
+        <ItemsControl ItemsSource="{Binding Boxes}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <Canvas />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <!-- Positioning lives on the container, not the template: Canvas.Left/Top
+               are attached properties of the ContentPresenter the Canvas lays out. -->
+          <ItemsControl.ItemContainerTheme>
+            <ControlTheme TargetType="ContentPresenter" x:DataType="vm:DetectionBox">
+              <Setter Property="Canvas.Left" Value="{Binding X}" />
+              <Setter Property="Canvas.Top" Value="{Binding Y}" />
+            </ControlTheme>
+          </ItemsControl.ItemContainerTheme>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:DetectionBox">
+              <Grid Width="{Binding Width}" Height="{Binding Height}">
+                <Rectangle Stroke="{Binding Stroke}" StrokeThickness="2" Fill="Transparent" />
+                <Border Background="{Binding Stroke}"
+                        HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Margin="0,-19,0,0" Padding="5,1" CornerRadius="2">
+                  <TextBlock Text="{Binding Label}" FontSize="11"
+                             FontWeight="SemiBold" Foreground="#0E1014" />
+                </Border>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Grid>
+    </Border>
+
+  </DockPanel>
+</Window>

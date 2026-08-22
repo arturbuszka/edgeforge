@@ -1,5 +1,11 @@
 namespace EdgeForge.Core;
 
+/// <summary>
+/// Box in image-relative coordinates: X, Y, Width and Height are fractions of the
+/// frame in the range 0..1, with the origin at the top-left corner. Normalised so
+/// a detection stays meaningful when the frame is resized, and so decision rules
+/// can be written once against any camera resolution.
+/// </summary>
 public readonly record struct BoundingBox(double X, double Y, double Width, double Height);
 
 /// <summary>
