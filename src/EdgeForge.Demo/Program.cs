@@ -112,6 +112,9 @@ static EdgeForgeOptions LoadOptions()
     var configuration = new ConfigurationBuilder()
         .SetBasePath(AppContext.BaseDirectory)
         .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+        // Gitignored overrides: camera credentials and machine-specific paths
+        // belong here, not in the tracked file above.
+        .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false)
         .AddEnvironmentVariables("EDGEFORGE_")
         .Build();
 

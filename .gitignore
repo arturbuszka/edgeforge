@@ -5,7 +5,8 @@
 
 # dotenv files
 .env
-
+*.Development.json
+*.Local.json
 # User-specific files
 *.rsuser
 *.suo
@@ -486,3 +487,7 @@ models/*.onnx
 
 # Frames written by the live viewer: training data, sometimes gigabytes of it
 captures/
+
+# Local configuration overrides: camera credentials, machine-specific paths.
+# Kept out of the tree so a live RTSP URL cannot reach a commit.
+appsettings.Local.json
