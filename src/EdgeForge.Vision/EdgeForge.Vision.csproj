@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\EdgeForge.Core\EdgeForge.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
+    <!-- Managed bindings alone are not enough: without a native runtime package
+         VideoCapture throws DllNotFoundException. Versions must match exactly. -->
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627"
+                      Condition="'$(OS)' == 'Windows_NT'" />
+    <PackageReference Include="OpenCvSharp4.official.runtime.linux-x64" Version="4.13.0.20260627"
+                      Condition="'$(OS)' != 'Windows_NT'" />
+  </ItemGroup>
+</Project>
