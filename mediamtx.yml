@@ -1,0 +1,51 @@
+# MediaMTX configuration for EdgeForge.
+#
+# The camera URL is NOT in this file. It arrives as MTX_CAMERA_URL from .env,
+# because an RTSP URL for a Reolink carries the admin password in its userinfo
+# field and this file is committed.
+
+logLevel: info
+
+# --- RTSP: republished, and the fallback that players like VLC understand ---
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+# --- WebRTC: the path the browser actually uses (WHEP) ---
+webrtc: yes
+webrtcAddress: :8889
+# An explicit UDP mux port, so exactly one port needs forwarding rather than the
+# ephemeral range ICE would otherwise pick.
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ""
+# Overridden by MTX_WEBRTCADDITIONALHOSTS from the environment. Left empty here
+# so the committed default is "advertise only what I can discover", and the
+# machine-specific answer lives in .env alongside the credentials.
+webrtcAdditionalHosts: []
+# No STUN/TURN. This is a LAN or a tailnet, and a public STUN server would be an
+# outbound internet dependency on an edge box that must keep working offline.
+webrtcICEServers2: []
+
+# --- HLS: fallback for iOS Safari and anything WebRTC cannot reach ---
+hls: yes
+hlsAddress: :8888
+hlsVariant: lowLatency
+hlsAlwaysRemux: no
+
+# --- Off: nothing should listen that is not used ---
+rtmp: no
+srt: no
+
+api: yes
+apiAddress: 127.0.0.1:9997
+
+paths:
+  cat:
+    source: ${MTX_CAMERA_URL}
+    sourceProtocol: tcp
+    # Connect to the camera only while someone is watching. With nobody on the
+    # page this container holds no RTSP session at all, which is what keeps the
+    # camera from serving two clients whenever the pipeline is also connected.
+    sourceOnDemand: yes
+    sourceOnDemandStartTimeout: 10s
+    sourceOnDemandCloseAfter: 10s

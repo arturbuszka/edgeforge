@@ -1,7 +1,6 @@
 using EdgeForge.Core;
-using EdgeForge.Runtime;
 
-namespace EdgeForge.Ui;
+namespace EdgeForge.Runtime;
 
 /// <summary>
 /// Everything the UI needs about one processed frame, with the pixels copied out.

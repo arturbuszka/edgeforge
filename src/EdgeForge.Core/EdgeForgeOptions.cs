@@ -102,6 +102,216 @@ public sealed class CaptureOptions
     public int MaxFiles { get; set; } = 5000;
 }
 
+/// <summary>
+/// Turning a stream of detections into meal events, and where those events land.
+/// </summary>
+/// <remarks>
+/// The decision layer. Without it "seven meals" is 1400 frames carrying a
+/// detection rather than seven events.
+///
+/// The three thresholds are chosen from how a cat actually eats - a visit lasts
+/// tens of seconds and contains pauses - and they are configuration rather than
+/// constants because the honest way to set them is to run for a few days, read
+/// back <c>meals.jsonl</c>, and adjust. Zero or negative values are rejected at
+/// startup rather than producing an event stream that quietly makes no sense.
+/// </remarks>
+public sealed class MealsOptions
+{
+    /// <summary>Turn meal counting on. Off leaves the pipeline exactly as it was.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Seconds the animal must be present before a meal starts. Rejects one
+    /// walking past the bowls; at 23 fps five seconds is ~115 frames of evidence.
+    /// </summary>
+    public double MinPresenceSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Seconds of absence that end a meal. The number most worth tuning: cats
+    /// leave the bowl and come back, and a gap under a minute is one meal with a
+    /// pause rather than two meals.
+    /// </summary>
+    public double MaxAbsenceSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Shortest meal worth logging, first sighting to last. Filters the animal
+    /// that lingered just past the start threshold without eating.
+    /// </summary>
+    public double MinMealSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// Where the overlay snapshot goes. Empty means "stats.json" beside the
+    /// binary, which is where an OBS Browser Source reads it from. Set to null-ish
+    /// only if nothing is reading it.
+    /// </summary>
+    public string StatsPath { get; set; } = "";
+
+    /// <summary>
+    /// Append-only meal history. Empty means "meals.jsonl" beside the binary.
+    /// Also what today's counter is rebuilt from after a restart.
+    /// </summary>
+    public string JournalPath { get; set; } = "";
+
+    /// <summary>
+    /// Floor on how often <see cref="StatsPath"/> is rewritten. A completed meal
+    /// and a change of state always write at once; this only throttles the idle
+    /// heartbeat, so the disk is not touched at camera framerate.
+    /// </summary>
+    public double StatsIntervalSeconds { get; set; } = 5;
+
+    /// <exception cref="InvalidOperationException">A threshold is not usable.</exception>
+    public void Validate()
+    {
+        if (MinPresenceSeconds <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Meals:MinPresenceSeconds must be greater than 0, got {MinPresenceSeconds}.");
+        }
+
+        if (MaxAbsenceSeconds <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Meals:MaxAbsenceSeconds must be greater than 0, got {MaxAbsenceSeconds}.");
+        }
+
+        if (MinMealSeconds < 0)
+        {
+            throw new InvalidOperationException(
+                $"Meals:MinMealSeconds must not be negative, got {MinMealSeconds}.");
+        }
+
+        if (StatsIntervalSeconds < 0)
+        {
+            throw new InvalidOperationException(
+                $"Meals:StatsIntervalSeconds must not be negative, got {StatsIntervalSeconds}.");
+        }
+    }
+}
+
+/// <summary>
+/// The local API and its live HUD: a REST surface plus a SignalR push channel,
+/// served by the separate EdgeForge.Api executable.
+/// </summary>
+/// <remarks>
+/// Video does NOT come from here. MediaMTX pulls the camera's RTSP stream and
+/// republishes it to the browser over WebRTC; this process serves counts and
+/// timestamps only. That is why "only events leave the device, never frames"
+/// holds again without qualification - the predecessor to this section,
+/// <c>WebOptions</c>, configured an MJPEG stream and was a deliberate exception
+/// to it.
+///
+/// It is still a household surface on a private network, not a product one: no
+/// accounts, no roles, no authentication framework. Nothing in the staged plan
+/// may depend on it.
+/// </remarks>
+public sealed class ApiOptions
+{
+    /// <summary>
+    /// Address to bind. "127.0.0.1" is loopback only. "0.0.0.0" binds every
+    /// interface, including the tailnet one and the LAN. A specific tailnet address
+    /// (100.x.y.z, from "tailscale ip -4") binds only the tailnet, which is the
+    /// tightest setting that still works from another device.
+    /// </summary>
+    public string BindAddress { get; set; } = "127.0.0.1";
+
+    public int Port { get; set; } = 5080;
+
+    /// <summary>
+    /// WHEP endpoint the browser POSTs its SDP offer to, served by MediaMTX. Handed
+    /// to the front-end through /api/config so the built bundle carries no
+    /// host-specific URL and the same bundle works from a phone or a tailnet.
+    /// </summary>
+    public string StreamUrl { get; set; } = "http://127.0.0.1:8889/cat/whep";
+
+    /// <summary>HLS fallback, for Safari and anything WebRTC cannot reach.</summary>
+    public string HlsUrl { get; set; } = "http://127.0.0.1:8888/cat/index.m3u8";
+
+    /// <summary>
+    /// Origins allowed in development, when Vite serves the front-end on its own
+    /// port. In production the bundle is served from this origin and CORS does not
+    /// apply, so this is empty-able without losing anything.
+    /// </summary>
+    public string[] DevOrigins { get; set; } = ["http://localhost:5173"];
+
+    /// <summary>
+    /// Floor on how often the live snapshot is recomputed and pushed on change.
+    /// One second is plenty for a HUD and keeps SignalR off camera framerate.
+    /// </summary>
+    public double PushIntervalSeconds { get; set; } = 1;
+
+    /// <exception cref="InvalidOperationException">A value is not usable.</exception>
+    public void Validate()
+    {
+        if (Port is < 1 or > 65535)
+        {
+            throw new InvalidOperationException(
+                $"Api:Port must be between 1 and 65535, got {Port}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(BindAddress))
+        {
+            throw new InvalidOperationException("Api:BindAddress must not be empty.");
+        }
+
+        if (!System.Net.IPAddress.TryParse(BindAddress, out _))
+        {
+            throw new InvalidOperationException(
+                $"Api:BindAddress must be an IP address, got '{BindAddress}'. " +
+                "Use 0.0.0.0 for every interface, or the tailnet address from 'tailscale ip -4'.");
+        }
+
+        // A relative URL here would resolve against the API's own origin, and the
+        // stream never comes from there - it comes from MediaMTX on another port.
+        // Catching it at startup beats a front-end that loads and shows no video.
+        if (!Uri.TryCreate(StreamUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException(
+                $"Api:StreamUrl must be an absolute URL, got '{StreamUrl}'. " +
+                "It points at MediaMTX, not at this process.");
+        }
+
+        if (!Uri.TryCreate(HlsUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException(
+                $"Api:HlsUrl must be an absolute URL, got '{HlsUrl}'. " +
+                "It points at MediaMTX, not at this process.");
+        }
+
+        if (PushIntervalSeconds <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Api:PushIntervalSeconds must be greater than 0, got {PushIntervalSeconds}.");
+        }
+    }
+}
+
+/// <summary>
+/// The queryable mirror of the meal journal.
+/// </summary>
+/// <remarks>
+/// <c>meals.jsonl</c> stays the durable append-only record; this database is a view
+/// over the same events, existing because a flat file cannot answer "meals between
+/// these two dates" without reading all of it. It is rebuildable by definition:
+/// delete the file, restart, and the journal refills it.
+/// </remarks>
+public sealed class StorageOptions
+{
+    /// <summary>Where the SQLite file lives. Empty means "meals.db" beside the binary.</summary>
+    public string DatabasePath { get; set; } = "";
+
+    /// <exception cref="InvalidOperationException">The path is not usable.</exception>
+    public void Validate()
+    {
+        // Empty is the documented default, not a mistake; only a value that cannot
+        // be a path at all is worth refusing.
+        if (DatabasePath.Length > 0 && DatabasePath.Trim().Length == 0)
+        {
+            throw new InvalidOperationException(
+                "Storage:DatabasePath must not be whitespace. Leave it empty for the default.");
+        }
+    }
+}
+
 public sealed class EdgeForgeOptions
 {
     public CameraOptions Camera { get; set; } = new();
@@ -109,4 +319,10 @@ public sealed class EdgeForgeOptions
     public DetectorOptions Detector { get; set; } = new();
 
     public CaptureOptions Capture { get; set; } = new();
+
+    public MealsOptions Meals { get; set; } = new();
+
+    public ApiOptions Api { get; set; } = new();
+
+    public StorageOptions Storage { get; set; } = new();
 }

@@ -28,5 +28,6 @@
     <ProjectReference Include="..\EdgeForge.Vision\EdgeForge.Vision.csproj" />
     <ProjectReference Include="..\EdgeForge.Runtime\EdgeForge.Runtime.csproj" />
     <ProjectReference Include="..\EdgeForge.Device\EdgeForge.Device.csproj" />
+    <ProjectReference Include="..\EdgeForge.Decision\EdgeForge.Decision.csproj" />
   </ItemGroup>
 </Project>

@@ -83,6 +83,162 @@ population such as the coop; pointing it at the bowls fills the event log with
 the animals' own absence. `ExpectedCount` is read only by that rule, so it is
 currently unused.
 
+## Counting meals
+
+Detection alone does not answer "how many times did they eat today". A cat at the
+bowls for a minute is ~1400 frames carrying a detection, and counting those gives
+1400, not 1. The decision layer in `EdgeForge.Decision` debounces the stream into
+events:
+
+| Setting | Default | What it does |
+| ------- | ------- | ------------ |
+| `Meals.MinPresenceSeconds` | 5 | Present for this long before a meal starts. Rejects a cat walking past. |
+| `Meals.MaxAbsenceSeconds` | 60 | Gone for this long before it ends. Cats leave the bowl and come back; a shorter gap is a pause, not a second meal. |
+| `Meals.MinMealSeconds` | 10 | Shortest meal worth logging, first sighting to last. |
+
+The defaults come from how a cat actually eats — a visit is tens of seconds long
+and contains pauses. `MaxAbsenceSeconds` is the one most worth tuning: too low
+and one visit is logged as five, too high and two genuine visits merge into one.
+Read `meals.jsonl` after a few days and adjust rather than guessing twice.
+
+Two details that are load-bearing:
+
+- **Absence is measured in seconds, not in empty frames.** At 41 ms per frame a
+  dropped-frame stall would otherwise read as the cat leaving, and a pipeline
+  hiccup would end a meal that never ended.
+- **The counter survives a restart.** Today's meals are rebuilt from
+  `meals.jsonl` on startup, so a process that dies at noon does not show zero for
+  the rest of the day.
+
+Meals are counted **at the bowls, not per cat**. Four cats are one presence
+signal, so two eating side by side is one meal with a peak count of two. Per-cat
+attribution needs tracking, which is the next milestone.
+
+Two files are written beside the binary:
+
+- `meals.jsonl` — append-only, one JSON object per completed meal. The persisted
+  event history, and what the thresholds get re-tuned against.
+- `stats.json` — the current day, rewritten atomically so a reader never sees a
+  half-written file.
+
+```json
+{
+  "updatedUtc": "2026-08-22T18:04:11.0000000+00:00",
+  "date": "2026-08-22",
+  "mealsToday": 7,
+  "lastMealEndedUtc": "2026-08-22T17:58:40.0000000+00:00",
+  "currentlyFeeding": false,
+  "totalFeedingSecondsToday": 412
+}
+```
+
+Set `Meals.Enabled` to `false` to leave the pipeline exactly as it was.
+
+### Stream overlay
+
+[overlay/meals.html](overlay/meals.html) is an OBS Browser Source that shows the
+counter. Add it with **Local file** ticked, pointed at that file; it polls
+`stats.json` from the same folder every two seconds and dims itself if the file
+goes stale, so a stopped pipeline does not leave a number on screen that has
+quietly stopped being true.
+
+Either copy the page next to the binary, or point `Meals.StatsPath` at the folder
+the page lives in.
+
+No HTTP server is involved in the overlay — OBS reads a local file, and that file
+carries counts and timestamps, never frames.
+
+The overlay is independent of `EdgeForge.Api` and keeps working unchanged whether
+the API runs or not. `stats.json` still carries exactly the six fields documented
+above; the richer document the API serves at `/api/stats` adds its extra fields
+only there, so nothing about what OBS reads has changed.
+
+## Live view
+
+A browser page showing the camera with a statistics HUD over it: meals today,
+whether a cat is at the bowls right now, how long for. Three pieces, and they are
+deliberately independent.
+
+**Video** comes from MediaMTX, not from .NET. It pulls the camera's RTSP stream
+and republishes it to the browser over WebRTC, which means the inference process
+never encodes or serves a pixel — *only events leave the device* holds without an
+exception. It also means MediaMTX going down stops the picture and not the
+counting, and stopping the pipeline stops the counting and not the picture.
+
+**Data** comes from `EdgeForge.Api`: a REST surface plus a SignalR channel that
+pushes a stats snapshot whenever it changes. It also hosts the capture loop, so it
+is the daemon as well as the API.
+
+**The page** is a small React app in `web/`.
+
+### Running it
+
+```
+cp .env.example .env          # then fill in MTX_CAMERA_URL
+docker compose up -d          # MediaMTX
+
+dotnet run --project src/EdgeForge.Api
+
+cd web && npm install && npm run dev     # development, on :5173
+```
+
+For production there is no Node involved: `npm run build` writes the bundle into
+the API's `wwwroot`, and the API then serves the page from its own origin.
+
+```
+cd web && npm run build
+dotnet run --project src/EdgeForge.Api   # page at http://127.0.0.1:5080/
+```
+
+### MTX_WEBRTC_HOST — read this before debugging a black screen
+
+This is the setting that eats an afternoon. A container behind NAT gathers ICE
+candidates from its own interfaces and advertises `172.x.x.x`, which the browser
+cannot route to. The WHEP POST returns 201, the SDP answer is valid, MediaMTX logs
+a happy reader — and the video never starts. Nothing looks wrong anywhere.
+
+Set `MTX_WEBRTC_HOST` in `.env` to the address the *browser* reaches MediaMTX on:
+
+| Watching from | Value |
+| --- | --- |
+| this machine | `127.0.0.1` |
+| a phone on the LAN | the host's LAN IP, e.g. `192.168.1.50` |
+| over Tailscale | the tailnet address from `tailscale ip -4` |
+
+Comma-separate for several: `127.0.0.1,192.168.1.50,100.x.y.z`.
+
+Two related traps: port 8189 must be mapped as `/udp` (it is, in the committed
+compose file — do not drop the suffix), and `network_mode: host` is a no-op on
+Windows Docker Desktop, so it would work on a Linux box and silently fail here.
+
+**Tailscale Funnel is out of scope.** It would publish the camera to the open
+internet. Keep this on the tailnet.
+
+**Run `EdgeForge.Ui` or `EdgeForge.Api`, not both.** Against one camera they open
+two RTSP sessions and two ONNX sessions on one GPU, and they keep two independent
+meal histories. They are alternatives, not companions.
+
+`EdgeForge.Api` with `Camera:Source` empty still serves stats and starts no
+capture loop, which is useful while working on the front-end.
+
+### Meal history
+
+Completed meals go to three places, and the redundancy is deliberate:
+
+- `meals.jsonl` — the durable append-only record, and the source of truth.
+- `stats.json` — the current snapshot, which the OBS overlay reads.
+- `meals.db` — a SQLite mirror, for the range queries `/api/meals?from=&to=`
+  answers. It is a view, not a second record: delete it and restart, and an
+  idempotent backfill rebuilds it from the journal.
+
+### Credentials
+
+The camera URL carries the admin password in its userinfo field and lives in
+exactly two gitignored files: `.env` for MediaMTX, `appsettings.Local.json` for
+the pipeline. Neither `appsettings.json` nor any committed compose file contains
+it, and `/api/config` deliberately never returns it — that response goes to every
+browser that loads the page.
+
 ## Where inference runs
 
 `Detector.ExecutionProvider` is `directml` (GPU) or `cpu`. DirectML runs on any
@@ -154,10 +310,14 @@ CPU and merely runs slow. Check the banner if the numbers look wrong.
 - `EdgeForge.Core` — domain contracts (`IFrameSource`, `IVisionDetector`, `IInspector`, `IInspectionAction`)
 - `EdgeForge.Vision` — capture and detection adapters (OpenCV, ONNX Runtime)
 - `EdgeForge.Runtime` — pipeline orchestration and latency metrics
+- `EdgeForge.Decision` — presence debounced into meal events, and where they are written
 - `EdgeForge.Device` — output abstraction
 - `EdgeForge.Demo` — runnable end-to-end demo (headless)
+- `EdgeForge.Storage` — SQLite mirror of `meals.jsonl`, for range queries
 - `EdgeForge.Ui` — Avalonia live viewer: video, detection overlay, statistics
-- `EdgeForge.Core.Tests` — unit tests
+- `EdgeForge.Api` — REST + SignalR, and the daemon that hosts the capture loop
+- `web/` — React page: WebRTC player from MediaMTX with a statistics HUD
+- `EdgeForge.Core.Tests`, `EdgeForge.Storage.Tests` — unit tests
 
 ## Product principle
 
@@ -172,10 +332,10 @@ Only events leave the device. Never frames.
 ## Next
 
 1. ~~real ONNX detector, replacing `SampleDetector`~~ — done
-2. zone decision on top of the count rule
-3. per-hen tracking
-4. events with duration (entered/left feeder)
-5. persisted event history
+2. ~~decision layer: presence debounced into events with duration~~ — done
+3. ~~persisted event history (`meals.jsonl`)~~ — done
+4. per-cat tracking, lifting the meal counter from the bowls to the animal
+5. zone decision (feeder, drinker) on top of the count rule
 6. temperature / humidity
 7. alerts and anomalies
 8. same architecture on one production line

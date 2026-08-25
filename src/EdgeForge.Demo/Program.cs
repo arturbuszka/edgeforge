@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using EdgeForge.Core;
+using EdgeForge.Decision;
 using EdgeForge.Device;
 using EdgeForge.Runtime;
 using EdgeForge.Vision;
@@ -39,12 +40,40 @@ catch (Exception ex) when (ex is OnnxRuntimeException or FileNotFoundException)
     return 2;
 }
 
+// The decision layer sits behind the console writer rather than replacing it:
+// the per-frame reading stays visible, and meal events are the further question
+// of what those readings mean over time.
+MealEventSink? meals = null;
 try
 {
+    IInspectionAction action = new ConsoleInspectionAction();
+    try
+    {
+        action = MealSinkFactory.Create(
+            action,
+            options.Meals,
+            options.Detector.ClassName,
+            AppContext.BaseDirectory,
+            note => Console.WriteLine($"Meals : {note}"));
+
+        meals = action as MealEventSink;
+        Console.WriteLine($"Meals  : {MealSinkFactory.Describe(options.Meals)}");
+
+        if (meals is not null)
+        {
+            Console.WriteLine($"Stats  : {Path.Combine(AppContext.BaseDirectory, "stats.json")}");
+        }
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.Error.WriteLine($"Invalid meal configuration: {ex.Message}");
+        return 2;
+    }
+
     var pipeline = new InspectionPipeline(
         detector,
         inspector,
-        new ConsoleInspectionAction());
+        action);
 
     // Precedence: CLI argument > environment > appsettings.json.
     var source = args.Length > 0 ? args[0] : options.Camera.Source;
@@ -57,7 +86,7 @@ try
 
     try
     {
-        await RunCameraAsync(pipeline, source, options.Camera.Capacity);
+        await RunCameraAsync(pipeline, source, options.Camera.Capacity, meals);
         return 0;
     }
     catch (ArgumentException ex)
@@ -73,6 +102,11 @@ try
 }
 finally
 {
+    // Belt and braces: RunCameraAsync flushes before printing its summary, but the
+    // synthetic and error paths never reach that. Flush is idempotent - a second
+    // call with nothing in progress returns null and writes the same stats.
+    meals?.Flush();
+
     // OnnxVisionDetector owns a native inference session.
     (detector as IDisposable)?.Dispose();
 }
@@ -129,7 +163,8 @@ static EdgeForgeOptions LoadOptions()
     return options;
 }
 
-static async Task RunCameraAsync(InspectionPipeline pipeline, string source, int capacity)
+static async Task RunCameraAsync(
+    InspectionPipeline pipeline, string source, int capacity, MealEventSink? meals)
 {
     var spec = FrameSourceSpec.Parse(source);
     var frameSource = new OpenCvFrameSource(spec, capacity);
@@ -196,10 +231,22 @@ static async Task RunCameraAsync(InspectionPipeline pipeline, string source, int
     elapsed.Stop();
     var seconds = elapsed.Elapsed.TotalSeconds;
 
+    // Close a meal still in progress BEFORE the summary is printed. Left to the
+    // outer finally it would run after these lines, and a run that ended mid-meal
+    // would report one meal fewer than it wrote to the journal a moment later.
+    meals?.Flush();
+
     Console.WriteLine();
     Console.WriteLine("SUMMARY");
     Console.WriteLine($"Processed : {processed}");
     Console.WriteLine($"Ok/Nok/Unk: {ok}/{nok}/{unknown}");
     Console.WriteLine($"Dropped   : {frameSource.DroppedFrames}");
     Console.WriteLine($"FPS       : {(seconds > 0 ? processed / seconds : 0):F1}");
+
+    if (meals is not null)
+    {
+        // The number this layer exists to produce: events, not frames with a
+        // detection in them.
+        Console.WriteLine($"Meals     : {meals.Snapshot.MealsToday} today");
+    }
 }

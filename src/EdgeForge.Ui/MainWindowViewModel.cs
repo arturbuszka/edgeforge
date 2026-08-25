@@ -9,6 +9,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using EdgeForge.Core;
+using EdgeForge.Decision;
 using EdgeForge.Runtime;
 using EdgeForge.Vision;
 
@@ -23,6 +24,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly InspectionSession _session;
     private readonly FrameWriter _writer;
     private readonly IVisionDetector _detector;
+    private readonly MealEventSink? _meals;
     private readonly RelayCommand _startCommand;
     private readonly RelayCommand _stopCommand;
     private readonly RelayCommand _snapshotCommand;
@@ -69,7 +71,26 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         _autoSave = _writer.AutoSaveEnabled;
 
-        var pipeline = new InspectionPipeline(_detector, inspector, new UiInspectionAction(LogFromWorker));
+        // Meal counting sits behind the viewer log rather than replacing it: the
+        // per-frame reading stays on screen, and meals are the separate question of
+        // what those readings add up to over time.
+        IInspectionAction action = new UiInspectionAction(LogFromWorker);
+        try
+        {
+            action = MealSinkFactory.Create(
+                action, options.Meals, options.Detector.ClassName,
+                AppContext.BaseDirectory, LogFromWorker);
+
+            _meals = action as MealEventSink;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A bad threshold disables meal counting; it must not stop the viewer
+            // from being usable for aiming the camera.
+            Log($"Meal counting off: {ex.Message}");
+        }
+
+        var pipeline = new InspectionPipeline(_detector, inspector, action);
 
         _session = new InspectionSession(pipeline, _writer);
         _session.SnapshotAvailable += OnSnapshotAvailable;
@@ -80,7 +101,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _stopCommand = new RelayCommand(() => _ = StopAsync(), () => IsRunning);
         _snapshotCommand = new RelayCommand(SaveSnapshot, () => IsRunning);
 
-        LiveStats = [CatsOnScreenStat, MaxCatsStat, ConfidenceStat, ResolutionStat];
+        LiveStats = [CatsOnScreenStat, MaxCatsStat, MealsTodayStat, ConfidenceStat, ResolutionStat];
         PerformanceStats =
         [
             FpsStat, CaptureLatencyStat, InferenceLatencyStat, DecisionLatencyStat,
@@ -92,6 +113,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         Log($"Model: {_modelDescription}");
         Log($"Captures: {_writer.Directory}");
+        Log($"Meals: {MealSinkFactory.Describe(options.Meals)}");
     }
 
     /// <summary>Raised on the UI thread once a new frame has reached the bitmap.</summary>
@@ -114,6 +136,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Live figures: what is in front of the camera right now.
     public StatRow CatsOnScreenStat { get; } = new("On screen");
     public StatRow MaxCatsStat { get; } = new("Most at once");
+    /// <summary>
+    /// The number the whole decision layer exists to produce, and the one destined
+    /// for the Twitch overlay. Meals at the bowls, not meals per cat - four cats
+    /// are not yet distinguishable from one another.
+    /// </summary>
+    public StatRow MealsTodayStat { get; } = new("Meals today");
+
     public StatRow ConfidenceStat { get; } = new("Best confidence");
     public StatRow ResolutionStat { get; } = new("Resolution");
 
@@ -370,6 +399,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (detection.Confidence > best) best = detection.Confidence;
         }
 
+        if (_meals is not null)
+        {
+            var meals = _meals.Snapshot;
+            MealsTodayStat.Value = meals.IsFeeding
+                ? $"{meals.MealsToday} (eating now)"
+                : meals.MealsToday.ToString(CultureInfo.InvariantCulture);
+        }
+
         CatsOnScreenStat.Value = count.ToString(CultureInfo.InvariantCulture);
         MaxCatsStat.Value = _maxCats.ToString(CultureInfo.InvariantCulture);
         ConfidenceStat.Value = count == 0 ? "-" : best.ToString("P0", CultureInfo.InvariantCulture);
@@ -413,6 +450,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             IsRunning = false;
             _uptime.Stop();
             _uptimeTimer.Stop();
+
+            // A meal still in progress when capture stops is closed here; without
+            // it the visit is never counted and the day is short by one.
+            _meals?.Flush();
 
             Boxes.Clear();
             _current = null;

@@ -14,5 +14,10 @@
     <ProjectReference Include="..\..\src\EdgeForge.Core\EdgeForge.Core.csproj" />
     <ProjectReference Include="..\..\src\EdgeForge.Vision\EdgeForge.Vision.csproj" />
     <ProjectReference Include="..\..\src\EdgeForge.Runtime\EdgeForge.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\EdgeForge.Decision\EdgeForge.Decision.csproj" />
+    <!-- For ApiEndpoints.BuildStats, which is pure and static precisely so it can
+         be tested without booting the host - booting it would start the capture
+         loop, which wants an ONNX session and a camera. -->
+    <ProjectReference Include="..\..\src\EdgeForge.Api\EdgeForge.Api.csproj" />
   </ItemGroup>
 </Project>

@@ -491,3 +491,26 @@ captures/
 # Local configuration overrides: camera credentials, machine-specific paths.
 # Kept out of the tree so a live RTSP URL cannot reach a commit.
 appsettings.Local.json
+
+# Meal events written at runtime. Ignored beside the binary already, via bin/,
+# but Meals:StatsPath and Meals:JournalPath can point anywhere - including the
+# repository root. These are event data from a particular machine, never source.
+stats.json
+meals.jsonl
+
+# Camera credentials for MediaMTX. .env is already ignored at the top of this
+# file; these are the other shapes the same secret takes, and a compose override
+# is the easiest one to create by accident.
+.env.local
+docker-compose.override.yml
+
+# The SQLite mirror of meals.jsonl. Same reasoning as stats.json above: it is
+# event data from a particular machine, and it is rebuildable from the journal.
+*.db
+*.db-shm
+*.db-wal
+
+# The Vite build output, produced into the API's wwwroot by `npm run build` in
+# web/. A .gitignore inside that folder would not survive: Vite's emptyOutDir
+# wipes the directory on every build.
+src/EdgeForge.Api/wwwroot/

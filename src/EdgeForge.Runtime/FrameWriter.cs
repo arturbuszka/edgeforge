@@ -2,7 +2,7 @@ using System.Globalization;
 using EdgeForge.Core;
 using EdgeForge.Vision;
 
-namespace EdgeForge.Ui;
+namespace EdgeForge.Runtime;
 
 /// <summary>
 /// Writes frames to disk, on the capture thread, under the limits in

@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Same reason as Demo and Ui: DirectML's native DLL only lands beside the
+         binary when a RID is set. Without it ONNX Runtime binds to the System32
+         DirectML - on Windows 11 a 2022 build - and session creation dies inside
+         AbiCustomRegistry with 0x80070057. SelfContained stays false. -->
+    <RuntimeIdentifier Condition="'$(OS)' == 'Windows_NT'">win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <!-- No Microsoft.Extensions.Configuration.* packages, and no SignalR package:
+       the ASP.NET Core shared framework already carries both, and naming them
+       here fails under NU1510. EF Core Sqlite is not in the shared framework, but
+       it arrives transitively through EdgeForge.Storage. -->
+
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('appsettings.Local.json')" />
+  </ItemGroup>
+
+  <!-- Copy the Vite build next to the binary.
+       ASP.NET's static web assets manifest resolves wwwroot relative to the
+       content root, which is the project directory under `dotnet run` and the
+       output directory when the .exe is launched directly - so without this the
+       page is served in development and 404s in the deployment that matters.
+       Enumerated at build time rather than glob-referenced, because the folder
+       does not exist on a fresh clone and Vite deletes and recreates it on every
+       build. -->
+  <Target Name="CopyWebBundle" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\wwwroot')">
+    <ItemGroup>
+      <WebBundle Include="$(MSBuildProjectDirectory)\wwwroot\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WebBundle)"
+          DestinationFiles="@(WebBundle->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EdgeForge.Core\EdgeForge.Core.csproj" />
+    <ProjectReference Include="..\EdgeForge.Vision\EdgeForge.Vision.csproj" />
+    <ProjectReference Include="..\EdgeForge.Runtime\EdgeForge.Runtime.csproj" />
+    <ProjectReference Include="..\EdgeForge.Device\EdgeForge.Device.csproj" />
+    <ProjectReference Include="..\EdgeForge.Decision\EdgeForge.Decision.csproj" />
+    <ProjectReference Include="..\EdgeForge.Storage\EdgeForge.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

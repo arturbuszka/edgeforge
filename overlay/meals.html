@@ -1,0 +1,101 @@
+<!doctype html>
+<!--
+  OBS Browser Source overlay: today's meal count at the bowls.
+
+  Add it in OBS as a Browser Source with "Local file" ticked, pointed at this
+  file. Set the width and height to whatever the scene needs; the layout is a
+  single centred line and scales with the font size below.
+
+  It reads stats.json from the same folder. EdgeForge writes that file beside its
+  binary, so either copy this page next to EdgeForge.Demo.exe / EdgeForge.Ui.exe,
+  or point Meals:StatsPath at the folder this page lives in.
+
+  No server is involved. The page polls a local file; nothing is requested over
+  the network, and nothing but counts and timestamps ever reaches it.
+-->
+<meta charset="utf-8">
+<title>EdgeForge — meals today</title>
+<style>
+  :root { color-scheme: dark; }
+
+  body {
+    margin: 0;
+    /* Transparent so OBS composites the text straight onto the scene. */
+    background: transparent;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+  }
+
+  .card {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.6rem 1.1rem;
+    border-radius: 0.75rem;
+    background: rgba(0, 0, 0, 0.55);
+    /* A stream is compressed; a hard shadow keeps the text legible over any scene. */
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+  }
+
+  .count { font-size: 3.5rem; font-weight: 700; line-height: 1; }
+  .label { font-size: 1.1rem; opacity: 0.85; }
+
+  /* Shown only while a cat is actually at the bowls. */
+  .now {
+    font-size: 1rem;
+    color: #7ee081;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .now.visible { opacity: 1; }
+
+  /* Stale data is worse than no data: if EdgeForge stopped, say so rather than
+     leaving a number on screen that quietly stops being true. */
+  .card.stale { opacity: 0.45; }
+</style>
+
+<div class="card" id="card">
+  <span class="count" id="count">–</span>
+  <span class="label">posiłki dziś</span>
+  <span class="now" id="now">je teraz</span>
+</div>
+
+<script>
+  // How stale stats.json may get before the overlay dims. EdgeForge rewrites it
+  // at least every few seconds while running, so a minute of silence means the
+  // pipeline is down, not that the cats are quiet.
+  const STALE_AFTER_MS = 60_000;
+  const POLL_MS = 2000;
+
+  const card = document.getElementById("card");
+  const count = document.getElementById("count");
+  const now = document.getElementById("now");
+
+  async function refresh() {
+    try {
+      // Cache-bust: OBS caches aggressively, and a cached file would freeze the
+      // number for the whole stream.
+      const response = await fetch(`stats.json?t=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(response.status);
+
+      const stats = await response.json();
+
+      count.textContent = stats.mealsToday ?? 0;
+      now.classList.toggle("visible", stats.currentlyFeeding === true);
+
+      const age = Date.now() - Date.parse(stats.updatedUtc);
+      card.classList.toggle("stale", !(age < STALE_AFTER_MS));
+    } catch {
+      // A missing or half-read file is normal at startup and during a write.
+      // Keep the last good number and dim it rather than flashing an error.
+      card.classList.add("stale");
+    }
+  }
+
+  refresh();
+  setInterval(refresh, POLL_MS);
+</script>

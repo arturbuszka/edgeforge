@@ -27,10 +27,14 @@ in a coop for weeks, shown live.
 | ----- | ------- | ------ |
 | V0 | camera + recording + detect hens | detector still a placeholder |
 | V1 | tracking per hen, counting, zones | |
-| V2 | event history, temperature/humidity | |
+| V2 | event history, temperature/humidity | event history DONE (meals.jsonl + SQLite); sensors outstanding |
 | V3 | feeding / drinking / egg events | |
 | V4 | alerts, anomaly detection | |
 | V5 | same architecture on one production line | |
+
+The live view — MediaMTX, `EdgeForge.Api` and the React page — is not a roadmap
+item. It is a household side surface, built because someone wanted to watch the
+cats from a phone, and nothing in the stages above depends on it.
 
 ## Hardware
 

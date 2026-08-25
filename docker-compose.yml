@@ -1,0 +1,33 @@
+# MediaMTX: pulls the camera's RTSP stream and republishes it as WebRTC (WHEP)
+# for the browser, with HLS as a fallback.
+#
+# The .NET pipeline is deliberately NOT in here. It runs on the host so it can
+# reach the GPU through DirectML, which a Linux container cannot do on Windows.
+# The two connect to the camera independently: MediaMTX going down stops the
+# picture and not the counting, and stopping the pipeline stops the counting and
+# not the picture.
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.16.1
+    container_name: edgeforge-mediamtx
+    restart: unless-stopped
+    environment:
+      # From .env, which is gitignored. Never inline the URL here - it carries
+      # the camera's admin password in the userinfo field.
+      MTX_CAMERA_URL: ${MTX_CAMERA_URL:?set MTX_CAMERA_URL in .env - copy .env.example}
+      # See "The NAT problem" in the README. Without this, WebRTC negotiates a
+      # container address (172.x) the browser cannot route to, and video never
+      # starts while every log line reports success.
+      MTX_WEBRTCADDITIONALHOSTS: ${MTX_WEBRTC_HOST:-127.0.0.1}
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "8554:8554/tcp"     # RTSP  - VLC/ffplay, and the first thing to test
+      - "8888:8888/tcp"     # HLS   - fallback player, ~2-5 s latency
+      - "8889:8889/tcp"     # WebRTC/WHEP signalling - what the React app uses
+      # The /udp suffix is mandatory. Without it Docker maps TCP, signalling
+      # succeeds, and media never flows.
+      - "8189:8189/udp"     # WebRTC ICE media
+      # Bound to 127.0.0.1 in mediamtx.yml as well; belt and braces, because this
+      # port can reconfigure paths at runtime.
+      - "127.0.0.1:9997:9997/tcp"   # control API / metrics

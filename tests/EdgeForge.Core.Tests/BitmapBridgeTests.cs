@@ -102,4 +102,85 @@ public class BitmapBridgeTests
         Assert.False(BitmapBridge.TrySaveToFile(frame, path));
         Assert.False(File.Exists(path));
     }
+
+    [Fact]
+    public void EncodeJpeg_ProducesADecodableImage()
+    {
+        using var mat = new Mat(16, 24, MatType.CV_8UC3, Scalar.All(128));
+
+        Assert.True(BitmapBridge.TryEncodeJpeg(FrameWith(mat), 75, out var jpeg));
+
+        // JPEG SOI marker: anything else means we handed the browser a body it
+        // cannot render, which shows up as a broken image rather than an exception.
+        Assert.Equal(0xFF, jpeg[0]);
+        Assert.Equal(0xD8, jpeg[1]);
+        Assert.Equal(0xFF, jpeg[2]);
+
+        using var decoded = Cv2.ImDecode(jpeg, ImreadModes.Color);
+        Assert.Equal(24, decoded.Width);
+        Assert.Equal(16, decoded.Height);
+    }
+
+    [Fact]
+    public void EncodeJpeg_SkipsFrameWithoutPixels()
+    {
+        var frame = new Frame("SYN-003", DateTimeOffset.UtcNow, 640, 480);
+
+        Assert.False(BitmapBridge.TryEncodeJpeg(frame, 75, out var jpeg));
+        Assert.Empty(jpeg);
+    }
+
+    [Fact]
+    public void EncodeJpeg_ClampsQualityRatherThanThrowing()
+    {
+        // The quality comes from configuration. A typo should cost image quality,
+        // not take the stream down mid-view.
+        using var mat = new Mat(8, 8, MatType.CV_8UC3, Scalar.All(64));
+
+        Assert.True(BitmapBridge.TryEncodeJpeg(mat, -5, out var low));
+        Assert.True(BitmapBridge.TryEncodeJpeg(mat, 500, out var high));
+        Assert.NotEmpty(low);
+        Assert.NotEmpty(high);
+    }
+
+    [Fact]
+    public void DrawDetections_MarksThePixelsItCovers()
+    {
+        using var mat = new Mat(100, 100, MatType.CV_8UC3, Scalar.All(0));
+        var detections = new[]
+        {
+            new Detection("cat", 0.88, new BoundingBox(0.25, 0.25, 0.5, 0.5))
+        };
+
+        BitmapBridge.DrawDetections(mat, detections);
+
+        // Something was drawn: an all-black Mat has no non-zero pixels.
+        Assert.True(Cv2.CountNonZero(mat.CvtColor(ColorConversionCodes.BGR2GRAY)) > 0);
+    }
+
+    [Fact]
+    public void DrawDetections_SurvivesABoxOutsideTheFrame()
+    {
+        // Undoing the letterbox can push a box just past the edge. OpenCV throws on
+        // a rectangle outside the Mat, which would kill the encoder task and with it
+        // every viewer - so the clamp is load-bearing, not defensive tidiness.
+        using var mat = new Mat(50, 50, MatType.CV_8UC3, Scalar.All(0));
+        var detections = new[]
+        {
+            new Detection("cat", 0.5, new BoundingBox(-0.2, -0.2, 1.6, 1.6)),
+            new Detection("cat", 0.5, new BoundingBox(0.98, 0.98, 0.5, 0.5))
+        };
+
+        BitmapBridge.DrawDetections(mat, detections);
+    }
+
+    [Fact]
+    public void DrawDetections_WithNoDetectionsLeavesTheFrameAlone()
+    {
+        using var mat = new Mat(20, 20, MatType.CV_8UC3, Scalar.All(0));
+
+        BitmapBridge.DrawDetections(mat, []);
+
+        Assert.Equal(0, Cv2.CountNonZero(mat.CvtColor(ColorConversionCodes.BGR2GRAY)));
+    }
 }

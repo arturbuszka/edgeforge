@@ -1,5 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\EdgeForge.Core\EdgeForge.Core.csproj" />
+
+    <!-- InspectionSession owns the capture loop, so it needs the concrete frame
+         source and the pixel bridge. That pulls OpenCV and ONNX Runtime in here
+         transitively. Accepted: the session is the same layer as InspectionPipeline
+         and belongs beside it, and a host that wants the loop wants a camera too.
+         If a Vision-free Runtime is ever needed, split these three files out into
+         an EdgeForge.Session project - that is a file move, not a redesign. -->
+    <ProjectReference Include="..\EdgeForge.Vision\EdgeForge.Vision.csproj" />
   </ItemGroup>
 </Project>

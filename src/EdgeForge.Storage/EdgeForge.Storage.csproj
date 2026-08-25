@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- EF Core rather than raw Microsoft.Data.Sqlite, and the reasoning is worth
+       recording because the repo's rules push the other way. One table, five
+       columns and three queries is about eighty lines of ADO with no dependency
+       at all. EF earns the reference on three specifics: SQLite has no native
+       date type, so DateTimeOffset round-tripping is hand-written code and
+       exactly where the bug would live; AddDbContextFactory gives correct
+       concurrency between the background service that writes and the HTTP
+       handlers that read; and per-cat attribution will need a schema change,
+       which is a migration here and an ALTER TABLE by hand otherwise. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <!-- Design-time only: dotnet-ef needs it to scaffold migrations. PrivateAssets
+         keeps it out of EdgeForge.Api's runtime output. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EdgeForge.Core\EdgeForge.Core.csproj" />
+    <ProjectReference Include="..\EdgeForge.Decision\EdgeForge.Decision.csproj" />
+  </ItemGroup>
+
+</Project>

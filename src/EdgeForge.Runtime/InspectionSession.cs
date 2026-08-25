@@ -1,8 +1,7 @@
 using EdgeForge.Core;
-using EdgeForge.Runtime;
 using EdgeForge.Vision;
 
-namespace EdgeForge.Ui;
+namespace EdgeForge.Runtime;
 
 /// <summary>
 /// Runs capture and inference on a worker thread and publishes the newest result
@@ -63,6 +62,28 @@ public sealed class InspectionSession : IDisposable
 
     /// <summary>Raised on the capture thread for anything worth showing in the log.</summary>
     public event Action<string>? Notified;
+
+    /// <summary>
+    /// Optional observer handed the live frame and its detections while the Mat is
+    /// still alive. Set it before <see cref="Start"/>.
+    /// </summary>
+    /// <remarks>
+    /// Runs on the capture thread, inside <see cref="_snapshotGate"/>, between
+    /// inference and the frame's dispose - the same window <see cref="SaveSnapshot"/>
+    /// relies on. Two rules follow from that, and breaking either is a native crash
+    /// rather than an exception:
+    ///
+    /// <list type="bullet">
+    /// <item>It MUST NOT retain the frame or its image past the call. The Mat is
+    /// freed as soon as it returns; anything kept is a dangling pointer.</item>
+    /// <item>It MUST NOT block. Whatever it costs is added to every frame, and the
+    /// gate it holds also blocks the viewer's save.</item>
+    /// </list>
+    ///
+    /// A consumer wanting to keep pixels should clone and hand the clone to its own
+    /// thread, which is what the web layer's broadcaster does.
+    /// </remarks>
+    public Action<Frame, IReadOnlyList<Detection>>? FrameObserver { get; set; }
 
     public bool IsRunning => _loop is { IsCompleted: false };
 
@@ -225,6 +246,10 @@ public sealed class InspectionSession : IDisposable
         {
             _latestFrame = frame;
             _latestDetections = result.Detections;
+
+            // Inside the gate deliberately: the observer reads the Mat, and the
+            // dispose in RunAsync's finally cannot run until we leave.
+            FrameObserver?.Invoke(frame, result.Detections);
         }
 
         SnapshotAvailable?.Invoke();
