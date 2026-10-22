@@ -25,10 +25,16 @@ public partial class MainWindow : Window
         // whenever a new frame arrives OR the control they sit on changes size.
         viewModel.FrameReady += ProjectBoxes;
         viewModel.FrameReady += RedrawVideo;
-        Video.SizeChanged += (_, _) => ProjectBoxes();
+        VideoHost.SizeChanged += (_, _) => ProjectBoxes();
     }
 
-    private void ProjectBoxes() => _viewModel?.ProjectBoxes(Video.Bounds.Size);
+    /// <summary>
+    /// Projects against the host grid, not the Image. A Uniform Image arranges to
+    /// the size it paints and is centred in the grid, so its own bounds carry no
+    /// letterbox - while the overlay canvases start at the grid's corner. Measuring
+    /// the Image put every box one letterbox bar too high (or too far left).
+    /// </summary>
+    private void ProjectBoxes() => _viewModel?.ProjectBoxes(VideoHost.Bounds.Size);
 
     /// <summary>
     /// Tells the Image to repaint after the view-model has written new pixels.

@@ -10,6 +10,10 @@ The first installation is a nine-hen coop — a 1:9 scale factory. A real physic
 process, running continuously, that we can instrument freely. See
 [docs/product.md](docs/product.md) for why that is the point.
 
+The second scenario is a line: items on a belt, each measured and judged once as
+it crosses a decision line. Eggs are the first thing it inspects — see
+[Scenarios and profiles](#scenarios-and-profiles).
+
 Camera input is real: USB device, RTSP URL or video file. Detection is real too
 — a YOLOv8 model running locally through ONNX Runtime. With no model configured
 the pipeline falls back to a deterministic placeholder, so it still runs on a
@@ -82,6 +86,70 @@ of the day it is. `CountInspector` — which marks any count other than
 population such as the coop; pointing it at the bowls fills the event log with
 the animals' own absence. `ExpectedCount` is read only by that rule, so it is
 currently unused.
+
+## Scenarios and profiles
+
+What stays the same whatever the camera watches: capture, the pipeline, latency
+metrics, the viewer, the journals. What changes is the **scenario** — which
+detector, which per-frame rule, and which decision layer turns readings into
+events. `Scenario` in configuration picks one; `EdgeForge.Runtime.Scenario`
+assembles it, and no host names a scenario in code.
+
+| Scenario | Question | Decision layer | Event |
+| --- | --- | --- | --- |
+| `bowls` (default) | is an animal at the bowls | presence debounced over time | a meal, in `meals.jsonl` |
+| `line` | is this item in spec | items tracked, judged once at a line | a verdict, in `items.jsonl` |
+
+A **profile** is a file in [profiles/](profiles/) that sets a scenario up for one
+product: detector, calibration, limits, reject classes. Select it with
+`EDGEFORGE_PROFILE`; it layers over `appsettings.json` and under
+`appsettings.Local.json` and `EDGEFORGE_*` variables. Inspecting something else on
+the line is a new profile, not new code.
+
+### The egg line
+
+```bash
+python3 tools/make_egg_sample.py          # regenerate samples/eggs.mp4 (numpy + ffmpeg)
+
+EDGEFORGE_PROFILE=eggs dotnet run --project src/EdgeForge.Demo -- samples/eggs.mp4
+EDGEFORGE_PROFILE=eggs dotnet run --project src/EdgeForge.Ui     # source: samples/eggs.mp4
+```
+
+[profiles/eggs.json](profiles/eggs.json) uses the `blob` detector: threshold,
+contour, fitted ellipse, millimetres from `Blob.MmPerPixel`. No model and no
+training data — on a plain belt under even light, geometry is the better
+instrument. Each egg is tracked across frames and judged once, at the decision
+line, on the **median** of every frame it was seen whole; an egg cut by the frame
+edge is tracked but not measured. Width (the short axis) is checked against
+`Line.Limits` — `width_mm >= 42` else `Undersize`.
+
+On the synthetic sample (30 eggs, 7 undersize, sizes in
+`samples/eggs.truth.csv`): 30 verdicts, 30 correct, width within 0.3 mm of the
+drawn size, 72 eggs/min — the belt's rate, not the decoder's, because the
+decision layer runs on the file's own clock. About 245 FPS headless on the CPU.
+
+Things that matter on a real belt, in order:
+
+- **Calibration.** `MmPerPixel` is one camera position. Lay a ruler on the belt,
+  count the pixels across 100 mm, divide. Move the camera, do it again.
+- **A fixed threshold, not Otsu.** `Blob.Threshold: 0` lets Otsu pick the cut per
+  frame; on a shaded egg it lands high and trims the darker rim. On the sample
+  that cost 0.8 mm on every egg and rejected a 42.8 mm one. Fixed at 60 the error
+  is 0.3 mm.
+- **This is a size screen, not grading.** EU classes are by weight; width is the
+  best single proxy a camera has, not a substitute for a scale.
+- **Defects need a model.** Cracks and dirt are not geometry. `Line.RejectClasses`
+  takes effect with a YOLO model trained on them (`Detector.Kind: "yolo"`,
+  `Detector.ClassNames: ["egg", "egg_cracked", ...]`); a reject class must be seen
+  in `MinRejectFrames` frames before it counts. Cracks show far better backlit
+  than lit from above.
+- **One side.** The camera sees the top of the egg. Real graders roll eggs to see
+  all of it.
+
+`EdgeForge.Api` and the web HUD serve the bowls only; they refuse `line` at
+startup rather than serve zeros. The viewer is the line's display: boxes in
+green, red or grey by verdict with the measurement on each, and the decision line
+drawn over the belt.
 
 ## Counting meals
 
@@ -338,7 +406,9 @@ Only events leave the device. Never frames.
 5. zone decision (feeder, drinker) on top of the count rule
 6. temperature / humidity
 7. alerts and anomalies
-8. same architecture on one production line
+8. ~~same architecture on one production line~~ — the `line` scenario, eggs first
+9. defect model for the line (cracked / dirty), trained on backlit captures
+10. reject output: a verdict driving a gate, timed from the decision line
 
 Staged plan in [docs/demo.md](docs/demo.md). Working agreement in
 [docs/instruction-agent.md](docs/instruction-agent.md).

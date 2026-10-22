@@ -497,6 +497,7 @@ appsettings.Local.json
 # repository root. These are event data from a particular machine, never source.
 stats.json
 meals.jsonl
+items.jsonl
 
 # Camera credentials for MediaMTX. .env is already ignored at the top of this
 # file; these are the other shapes the same secret takes, and a compose override

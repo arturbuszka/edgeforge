@@ -9,5 +9,23 @@
          If a Vision-free Runtime is ever needed, split these three files out into
          an EdgeForge.Session project - that is a file move, not a redesign. -->
     <ProjectReference Include="..\EdgeForge.Vision\EdgeForge.Vision.csproj" />
+
+    <!-- Scenario assembles detector, rule and decision layer, so it needs the
+         decision layer. Decision itself still depends on Core alone. -->
+    <ProjectReference Include="..\EdgeForge.Decision\EdgeForge.Decision.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- EdgeForgeConfiguration: the one place options are loaded, for every host. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Profiles live once, at the repository root, and land in profiles/ beside
+         every host's binary: CopyToOutputDirectory items of a referenced project
+         flow into the referencing project's output. -->
+    <None Include="..\..\profiles\*.json"
+          Link="profiles\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

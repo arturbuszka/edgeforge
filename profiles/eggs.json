@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "Eggs on a belt: size by geometry, one verdict per egg at the decision line.",
+    "Select with EDGEFORGE_PROFILE=eggs. Layered over appsettings.json and under",
+    "appsettings.Local.json and EDGEFORGE_* variables.",
+    "",
+    "Blob.MmPerPixel is the calibration and is specific to one camera position:",
+    "lay a ruler on the belt, measure how many pixels 100 mm spans, divide.",
+    "0.3333 matches samples/eggs.mp4 (960 px across 320 mm of belt).",
+    "",
+    "Limits are checked against each egg's median over every frame it was seen",
+    "whole. Width is the short axis, the closest single proxy for weight class",
+    "a camera has - EU classes are by weight, so this is a size screen, not grading.",
+    "",
+    "Blob.Threshold is fixed, not Otsu (0), on purpose. With a lit station the",
+    "belt and the eggs sit at known grey levels; Otsu re-picks the cut every",
+    "frame and lands high on a shaded egg, trimming its darker rim - measured",
+    "on samples/eggs.mp4 as ~0.8 mm undersize on every egg, enough to reject a",
+    "42.8 mm egg against a 42 mm limit. It also splits noise on an empty belt.",
+    "Set it halfway between belt and the darkest egg rim; 60 suits the sample.",
+    "",
+    "RejectClasses only fire with a model trained on them (Detector.Kind=yolo and",
+    "Detector.ClassNames). The blob detector reports 'egg' only."
+  ],
+  "Scenario": "line",
+  "Detector": {
+    "Kind": "blob"
+  },
+  "Blob": {
+    "ClassName": "egg",
+    "BrightObjects": true,
+    "Threshold": 60,
+    "MinAreaFraction": 0.005,
+    "MaxAreaFraction": 0.2,
+    "MmPerPixel": 0.3333,
+    "BlurKernel": 5
+  },
+  "Line": {
+    "DecisionLine": 0.5,
+    "Direction": "LeftToRight",
+    "MaxJump": 0.1,
+    "MaxAbsenceSeconds": 0.5,
+    "MinRejectFrames": 2,
+    "RejectClasses": [ "egg_cracked", "egg_dirty" ],
+    "Limits": [
+      { "Measurement": "width_mm", "Min": 42, "Reason": "Undersize" },
+      { "Measurement": "length_mm", "Max": 66, "Reason": "Oversize" }
+    ],
+    "JournalPath": ""
+  }
+}

@@ -1,6 +1,6 @@
 using Avalonia;
 using EdgeForge.Core;
-using Microsoft.Extensions.Configuration;
+using EdgeForge.Runtime;
 
 namespace EdgeForge.Ui;
 
@@ -33,26 +33,9 @@ internal static class Program
             .LogToTrace();
 
     /// <summary>
-    /// Same shape as the headless demo: a camera URL and its credentials belong in
-    /// configuration, not in shell history.
+    /// The shared loader: appsettings.json, then the profile named by
+    /// EDGEFORGE_PROFILE, then local overrides and environment.
     /// </summary>
-    private static EdgeForgeOptions LoadOptions()
-    {
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(AppContext.BaseDirectory)
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-            .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false)
-            .AddEnvironmentVariables("EDGEFORGE_")
-            .Build();
-
-        var options = configuration.Get<EdgeForgeOptions>() ?? new EdgeForgeOptions();
-
-        if (options.Camera.Capacity < 1)
-        {
-            throw new InvalidOperationException(
-                $"Camera:Capacity must be at least 1, got {options.Camera.Capacity}.");
-        }
-
-        return options;
-    }
+    private static EdgeForgeOptions LoadOptions() =>
+        EdgeForgeConfiguration.Load(AppContext.BaseDirectory);
 }

@@ -31,6 +31,29 @@ console / event log / meals.jsonl / stats.json / SQLite / SignalR
 Video takes a separate path and never enters this one: MediaMTX pulls the same
 camera and republishes it to the browser. See *Video path* below.
 
+## Scenarios
+
+The layers above are fixed. What fills three of them depends on the scene, and
+`EdgeForge.Runtime.Scenario` is where that choice is made, from configuration:
+
+| | bowls | line |
+| --- | --- | --- |
+| `IVisionDetector` | YOLO (COCO class), or blob | blob (geometry), or YOLO (custom classes) |
+| `IInspector` | `PresenceInspector` | `ItemRuleInspector` — per frame, not the verdict |
+| decision sink | `MealEventSink` → `MealDetector` | `LineEventSink` → `LineCounter` → `ItemTracker` + `ItemRule` |
+| event | meal: start, end, duration | verdict: item, status, reason, median measurements |
+
+Hosts supply their innermost action (console, viewer log) and talk to the decision
+layer only through `IDecisionSink`: `Flush` at end of stream, `Readout` for
+figures. Anything scenario-specific beyond that — the meal API and its SQLite
+mirror — is reached through the concrete type by the one host that needs it.
+
+`Detection.Measurements` is how a detector reports physical quantities (`width_mm`
+…), and `LineOptions.Limits` names them, so a new measured product is a profile
+rather than a code change. `InspectionResult.Timestamp` carries the frame's scene
+time — capture time for a camera, the file's own clock for a recording — and both
+decision layers run on it, so a replay yields the events the footage contains.
+
 ## The four levels
 
 The pipeline is the same four levels we later sell to a plant. Each is a

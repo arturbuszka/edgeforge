@@ -16,6 +16,13 @@ public sealed class CameraOptions
 public sealed class DetectorOptions
 {
     /// <summary>
+    /// Which detector to build: "yolo" (an ONNX model, or the placeholder when
+    /// <see cref="ModelPath"/> is empty) or "blob" (classical segmentation and
+    /// measurement, configured under <c>Blob</c>).
+    /// </summary>
+    public string Kind { get; set; } = DetectorKinds.Yolo;
+
+    /// <summary>
     /// Path to an exported YOLOv8 .onnx model. Empty runs the deterministic
     /// placeholder detector instead, so the demo works with no model on disk.
     /// </summary>
@@ -37,6 +44,14 @@ public sealed class DetectorOptions
 
     /// <summary>Domain name reported for detections of <see cref="ClassId"/>.</summary>
     public string ClassName { get; set; } = "cat";
+
+    /// <summary>
+    /// Names for every class of a custom-trained model, in training order, e.g.
+    /// ["egg", "egg_cracked", "egg_dirty"]. When set, every class is kept and
+    /// <see cref="ClassId"/> and <see cref="ClassName"/> are ignored. Empty keeps
+    /// the single-class COCO behaviour.
+    /// </summary>
+    public string[] ClassNames { get; set; } = [];
 
     /// <summary>
     /// Population a count rule expects to see in frame. Currently unread: the
@@ -263,14 +278,14 @@ public sealed class ApiOptions
         // A relative URL here would resolve against the API's own origin, and the
         // stream never comes from there - it comes from MediaMTX on another port.
         // Catching it at startup beats a front-end that loads and shows no video.
-        if (!Uri.TryCreate(StreamUrl, UriKind.Absolute, out _))
+        if (!IsHttpUrl(StreamUrl))
         {
             throw new InvalidOperationException(
                 $"Api:StreamUrl must be an absolute URL, got '{StreamUrl}'. " +
                 "It points at MediaMTX, not at this process.");
         }
 
-        if (!Uri.TryCreate(HlsUrl, UriKind.Absolute, out _))
+        if (!IsHttpUrl(HlsUrl))
         {
             throw new InvalidOperationException(
                 $"Api:HlsUrl must be an absolute URL, got '{HlsUrl}'. " +
@@ -283,6 +298,16 @@ public sealed class ApiOptions
                 $"Api:PushIntervalSeconds must be greater than 0, got {PushIntervalSeconds}.");
         }
     }
+
+    /// <summary>
+    /// An absolute http(s) URL. The scheme check is not decoration: on Linux and
+    /// macOS <c>Uri.TryCreate("/cat/whep", UriKind.Absolute, ...)</c> succeeds and
+    /// yields <c>file:///cat/whep</c>, so "absolute" alone lets a relative path
+    /// through on every platform except Windows.
+    /// </summary>
+    private static bool IsHttpUrl(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 }
 
 /// <summary>
@@ -314,6 +339,12 @@ public sealed class StorageOptions
 
 public sealed class EdgeForgeOptions
 {
+    /// <summary>
+    /// What the installation is watching: "bowls" (meal events) or "line" (one
+    /// verdict per item crossing a decision line). See <see cref="ScenarioNames"/>.
+    /// </summary>
+    public string Scenario { get; set; } = ScenarioNames.Bowls;
+
     public CameraOptions Camera { get; set; } = new();
 
     public DetectorOptions Detector { get; set; } = new();
@@ -325,4 +356,26 @@ public sealed class EdgeForgeOptions
     public ApiOptions Api { get; set; } = new();
 
     public StorageOptions Storage { get; set; } = new();
+
+    public BlobOptions Blob { get; set; } = new();
+
+    public LineOptions Line { get; set; } = new();
+
+    /// <summary>
+    /// Checks the scenario name, the detector kind, and the sections those two
+    /// actually use. A section that is not in use is not validated: a half-edited
+    /// Line block must not stop the bowls from running.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A value is not usable.</exception>
+    public void ValidateScenario()
+    {
+        ScenarioNames.Validate(Scenario);
+        DetectorKinds.Validate(Detector.Kind);
+
+        if (Detector.Kind == DetectorKinds.Blob) Blob.Validate();
+        if (Scenario == ScenarioNames.Line) Line.Validate();
+
+        // Meals are validated where the sink is built, as before: the viewer
+        // treats a bad meal threshold as "counting off", not as a refusal to run.
+    }
 }

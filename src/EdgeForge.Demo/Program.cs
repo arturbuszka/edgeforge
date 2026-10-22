@@ -4,7 +4,6 @@ using EdgeForge.Decision;
 using EdgeForge.Device;
 using EdgeForge.Runtime;
 using EdgeForge.Vision;
-using Microsoft.Extensions.Configuration;
 using Microsoft.ML.OnnxRuntime;
 
 Console.WriteLine("EDGEFORGE INSPECTION");
@@ -15,7 +14,11 @@ Console.WriteLine();
 EdgeForgeOptions options;
 try
 {
-    options = LoadOptions();
+    options = EdgeForgeConfiguration.Load(AppContext.BaseDirectory);
+
+    // Strict here, unlike the viewer: a headless run with a bad meal threshold
+    // would count nothing and say so only in passing.
+    if (options.Scenario == ScenarioNames.Bowls && options.Meals.Enabled) options.Meals.Validate();
 }
 catch (Exception ex) when (ex is InvalidOperationException or FormatException)
 {
@@ -23,15 +26,16 @@ catch (Exception ex) when (ex is InvalidOperationException or FormatException)
     return 2;
 }
 
-// Plain `new`, no container: the graph is three objects deep and naming them
-// here is more honest than registering them somewhere else. The detector pair
-// itself comes from DetectorFactory so the viewer builds the same graph.
-IVisionDetector detector;
-IInspector inspector;
+// Plain `new`, no container. The scenario decides detector, rule and decision
+// layer; this host only supplies its console writer and the capture loop.
+Scenario scenario;
 try
 {
-    (detector, inspector) = DetectorFactory.Create(options.Detector);
-    Console.WriteLine($"Model  : {DetectorFactory.Describe(options.Detector, detector)}");
+    scenario = Scenario.Create(
+        options,
+        new ConsoleInspectionAction(),
+        AppContext.BaseDirectory,
+        note => Console.WriteLine($"Event  : {note}"));
 }
 catch (Exception ex) when (ex is OnnxRuntimeException or FileNotFoundException)
 {
@@ -40,75 +44,48 @@ catch (Exception ex) when (ex is OnnxRuntimeException or FileNotFoundException)
     return 2;
 }
 
-// The decision layer sits behind the console writer rather than replacing it:
-// the per-frame reading stays visible, and meal events are the further question
-// of what those readings mean over time.
-MealEventSink? meals = null;
-try
+using (scenario)
 {
-    IInspectionAction action = new ConsoleInspectionAction();
-    try
-    {
-        action = MealSinkFactory.Create(
-            action,
-            options.Meals,
-            options.Detector.ClassName,
-            AppContext.BaseDirectory,
-            note => Console.WriteLine($"Meals : {note}"));
-
-        meals = action as MealEventSink;
-        Console.WriteLine($"Meals  : {MealSinkFactory.Describe(options.Meals)}");
-
-        if (meals is not null)
-        {
-            Console.WriteLine($"Stats  : {Path.Combine(AppContext.BaseDirectory, "stats.json")}");
-        }
-    }
-    catch (InvalidOperationException ex)
-    {
-        Console.Error.WriteLine($"Invalid meal configuration: {ex.Message}");
-        return 2;
-    }
+    foreach (var line in scenario.Describe(options)) Console.WriteLine(line);
 
     var pipeline = new InspectionPipeline(
-        detector,
-        inspector,
-        action);
-
-    // Precedence: CLI argument > environment > appsettings.json.
-    var source = args.Length > 0 ? args[0] : options.Camera.Source;
-
-    if (string.IsNullOrWhiteSpace(source))
-    {
-        await RunSyntheticAsync(pipeline);
-        return 0;
-    }
+        scenario.Detector,
+        scenario.Inspector,
+        scenario.Action);
 
     try
     {
-        await RunCameraAsync(pipeline, source, options.Camera.Capacity, meals);
-        return 0;
-    }
-    catch (ArgumentException ex)
-    {
-        Console.Error.WriteLine($"Invalid source: {ex.Message}");
-        return 2;
-    }
-    catch (InvalidOperationException ex)
-    {
-        Console.Error.WriteLine($"Capture failed: {ex.Message}");
-        return 1;
-    }
-}
-finally
-{
-    // Belt and braces: RunCameraAsync flushes before printing its summary, but the
-    // synthetic and error paths never reach that. Flush is idempotent - a second
-    // call with nothing in progress returns null and writes the same stats.
-    meals?.Flush();
+        // Precedence: CLI argument > environment > profile > appsettings.json.
+        var source = args.Length > 0 ? args[0] : options.Camera.Source;
 
-    // OnnxVisionDetector owns a native inference session.
-    (detector as IDisposable)?.Dispose();
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            await RunSyntheticAsync(pipeline);
+            return 0;
+        }
+
+        try
+        {
+            await RunCameraAsync(pipeline, source, options.Camera.Capacity, scenario.Sink);
+            return 0;
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine($"Invalid source: {ex.Message}");
+            return 2;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"Capture failed: {ex.Message}");
+            return 1;
+        }
+    }
+    finally
+    {
+        // Belt and braces: RunCameraAsync flushes before printing its summary, but
+        // the synthetic and error paths never reach that. Flush is idempotent.
+        scenario.Sink?.Flush();
+    }
 }
 
 // Runs with nothing connected, so the demo always has something to show.
@@ -139,32 +116,8 @@ static async Task RunSyntheticAsync(InspectionPipeline pipeline)
     }
 }
 
-static EdgeForgeOptions LoadOptions()
-{
-    // No DI container and no host builder: just enough configuration to keep a
-    // camera URL (and its credentials) out of the command line and shell history.
-    var configuration = new ConfigurationBuilder()
-        .SetBasePath(AppContext.BaseDirectory)
-        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-        // Gitignored overrides: camera credentials and machine-specific paths
-        // belong here, not in the tracked file above.
-        .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false)
-        .AddEnvironmentVariables("EDGEFORGE_")
-        .Build();
-
-    var options = configuration.Get<EdgeForgeOptions>() ?? new EdgeForgeOptions();
-
-    if (options.Camera.Capacity < 1)
-    {
-        throw new InvalidOperationException(
-            $"Camera:Capacity must be at least 1, got {options.Camera.Capacity}.");
-    }
-
-    return options;
-}
-
 static async Task RunCameraAsync(
-    InspectionPipeline pipeline, string source, int capacity, MealEventSink? meals)
+    InspectionPipeline pipeline, string source, int capacity, IDecisionSink? sink)
 {
     var spec = FrameSourceSpec.Parse(source);
     var frameSource = new OpenCvFrameSource(spec, capacity);
@@ -231,10 +184,10 @@ static async Task RunCameraAsync(
     elapsed.Stop();
     var seconds = elapsed.Elapsed.TotalSeconds;
 
-    // Close a meal still in progress BEFORE the summary is printed. Left to the
-    // outer finally it would run after these lines, and a run that ended mid-meal
-    // would report one meal fewer than it wrote to the journal a moment later.
-    meals?.Flush();
+    // Close anything still in progress - a meal - BEFORE the summary is printed.
+    // Left to the outer finally it would run after these lines, and a run that
+    // ended mid-meal would report one fewer than it wrote to the journal.
+    sink?.Flush();
 
     Console.WriteLine();
     Console.WriteLine("SUMMARY");
@@ -243,10 +196,13 @@ static async Task RunCameraAsync(
     Console.WriteLine($"Dropped   : {frameSource.DroppedFrames}");
     Console.WriteLine($"FPS       : {(seconds > 0 ? processed / seconds : 0):F1}");
 
-    if (meals is not null)
+    if (sink is not null)
     {
-        // The number this layer exists to produce: events, not frames with a
-        // detection in them.
-        Console.WriteLine($"Meals     : {meals.Snapshot.MealsToday} today");
+        // The numbers the decision layer exists to produce: events, not frames
+        // with a detection in them.
+        foreach (var line in sink.Readout())
+        {
+            Console.WriteLine($"{line.Label,-14}: {line.Value}");
+        }
     }
 }

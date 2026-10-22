@@ -26,15 +26,7 @@ public static class DetectorFactory
             return (new SampleDetector(), new LabelInspector());
         }
 
-        var detector = new OnnxVisionDetector(
-            options.ModelPath,
-            options.NetSize,
-            options.ScoreThreshold,
-            options.NmsThreshold,
-            options.ClassId,
-            options.ClassName,
-            options.ExecutionProvider,
-            options.GpuDeviceId);
+        var detector = CreateOnnx(options);
 
         // Presence, not count: at the bowls zero animals is the normal state, and
         // CountInspector would mark almost every frame of the day Nok. See
@@ -43,6 +35,40 @@ public static class DetectorFactory
 
         return (detector, inspector);
     }
+
+    /// <summary>
+    /// Builds the detector alone, for a scenario that pairs it with its own rule.
+    /// </summary>
+    /// <remarks>
+    /// "yolo" with no model path still gives the placeholder, so a fresh clone runs
+    /// end to end. "blob" needs no model at all.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The Kind or a Blob value is not usable.</exception>
+    public static IVisionDetector CreateDetector(DetectorOptions options, BlobOptions blob)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(blob);
+
+        DetectorKinds.Validate(options.Kind);
+
+        if (options.Kind == DetectorKinds.Blob) return new BlobDetector(blob);
+
+        return string.IsNullOrWhiteSpace(options.ModelPath)
+            ? new SampleDetector()
+            : CreateOnnx(options);
+    }
+
+    private static OnnxVisionDetector CreateOnnx(DetectorOptions options) =>
+        new(
+            options.ModelPath,
+            options.NetSize,
+            options.ScoreThreshold,
+            options.NmsThreshold,
+            options.ClassId,
+            options.ClassName,
+            options.ExecutionProvider,
+            options.GpuDeviceId,
+            options.ClassNames);
 
     /// <summary>One line describing the active model, for a status bar or console banner.</summary>
     /// <param name="detector">
@@ -55,6 +81,11 @@ public static class DetectorFactory
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        if (detector is BlobDetector)
+        {
+            return "blob segmentation (no model)";
+        }
+
         if (string.IsNullOrWhiteSpace(options.ModelPath))
         {
             return "none (SampleDetector placeholder)";
@@ -64,8 +95,11 @@ public static class DetectorFactory
             ? onnx.ActiveProvider
             : options.ExecutionProvider;
 
-        var line = $"{options.ModelPath} ({options.NetSize}px, class {options.ClassId} " +
-                   $"'{options.ClassName}', {provider})";
+        var classes = options.ClassNames.Length > 0
+            ? $"classes [{string.Join(", ", options.ClassNames)}]"
+            : $"class {options.ClassId} '{options.ClassName}'";
+
+        var line = $"{options.ModelPath} ({options.NetSize}px, {classes}, {provider})";
 
         // Selecting the wrong GPU costs about 7x here and shows up as nothing but
         // slowness, so say out loud what the alternatives were.

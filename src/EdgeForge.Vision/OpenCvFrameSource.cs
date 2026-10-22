@@ -120,6 +120,12 @@ public sealed class OpenCvFrameSource : IFrameSource
             var sequence = 0L;
             var consecutiveFailures = 0;
 
+            // A file's own clock: frame index over its frame rate, anchored at the
+            // moment playback started. Deterministic, unlike the decode position,
+            // and independent of how fast the pipeline happens to consume frames.
+            var fileFps = _spec.Kind == FrameSourceKind.File ? capture.Get(VideoCaptureProperties.Fps) : 0;
+            var sceneOrigin = DateTimeOffset.UtcNow;
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 var mat = new Mat();
@@ -146,11 +152,18 @@ public sealed class OpenCvFrameSource : IFrameSource
                 consecutiveFailures = 0;
 
                 var frame = new Frame(
-                    $"CAM-{sequence++:000000}",
+                    $"CAM-{sequence:000000}",
                     DateTimeOffset.UtcNow,
                     mat.Width,
                     mat.Height,
-                    new MatFrameImage(mat));
+                    new MatFrameImage(mat))
+                {
+                    SceneTime = fileFps > 0
+                        ? sceneOrigin + TimeSpan.FromSeconds(sequence / fileFps)
+                        : null
+                };
+
+                sequence++;
 
                 Write(writer, reader, frame, cancellationToken);
             }

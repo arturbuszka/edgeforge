@@ -32,6 +32,7 @@ public sealed class OnnxVisionDetector : IVisionDetector, IDisposable
     private readonly float _nmsThresh;
     private readonly int _classId;
     private readonly string _className;
+    private readonly string[] _classNames;
 
     /// <summary>Provider the session actually opened with, for the status banner.</summary>
     public string ActiveProvider { get; }
@@ -44,6 +45,11 @@ public sealed class OnnxVisionDetector : IVisionDetector, IDisposable
     /// <param name="className">Domain name reported for that class.</param>
     /// <param name="executionProvider">"directml" for the GPU, "cpu" to force the CPU.</param>
     /// <param name="gpuDeviceId">DXGI adapter index for DirectML. See DetectorOptions.</param>
+    /// <param name="classNames">
+    /// Every class of a custom model, in training order. When non-empty all classes
+    /// are kept and named from this list; <paramref name="classId"/> and
+    /// <paramref name="className"/> are ignored.
+    /// </param>
     public OnnxVisionDetector(
         string modelPath,
         int netSize = 640,
@@ -52,7 +58,8 @@ public sealed class OnnxVisionDetector : IVisionDetector, IDisposable
         int classId = 15,
         string className = "cat",
         string executionProvider = "directml",
-        int gpuDeviceId = 0)
+        int gpuDeviceId = 0,
+        IReadOnlyList<string>? classNames = null)
     {
         // Loaded once, for the lifetime of the detector. Building a session per
         // frame would dwarf inference itself.
@@ -61,7 +68,8 @@ public sealed class OnnxVisionDetector : IVisionDetector, IDisposable
         _netSize = netSize;
         _scoreThresh = scoreThresh;
         _nmsThresh = nmsThresh;
-        _classId = classId;
+        _classNames = classNames?.ToArray() ?? [];
+        _classId = _classNames.Length > 0 ? -1 : classId;
         _className = className;
     }
 
@@ -165,7 +173,7 @@ public sealed class OnnxVisionDetector : IVisionDetector, IDisposable
         var kept = NonMaxSuppression(candidates, _nmsThresh);
 
         var detections = new List<Detection>(kept.Count);
-        foreach (var (tlbr, score, _) in kept)
+        foreach (var (tlbr, score, cls) in kept)
         {
             // Network pixels -> original image pixels -> normalised 0..1.
             double x1 = tlbr[0] / lb.Ratio / frameWidth;
@@ -174,12 +182,24 @@ public sealed class OnnxVisionDetector : IVisionDetector, IDisposable
             double y2 = tlbr[3] / lb.Ratio / frameHeight;
 
             detections.Add(new Detection(
-                _className,
+                NameOf(cls),
                 score,
                 new BoundingBox(x1, y1, x2 - x1, y2 - y1)));
         }
 
         return detections;
+    }
+
+    /// <summary>
+    /// Domain name for a model class index. A class beyond the configured list is
+    /// named by its index rather than dropped: a model with more classes than the
+    /// configuration knows about is a mismatch worth seeing in the log.
+    /// </summary>
+    private string NameOf(int cls)
+    {
+        if (_classNames.Length == 0) return _className;
+
+        return cls < _classNames.Length ? _classNames[cls] : $"class{cls}";
     }
 
     /// <summary>

@@ -34,7 +34,7 @@ public sealed class PipelineHost : BackgroundService
     private readonly IMealStore _store;
     private readonly ILogger<PipelineHost> _log;
 
-    private readonly IVisionDetector _detector;
+    private readonly Scenario _scenario;
     private readonly InspectionSession _session;
     private readonly MealEventSink? _meals;
     private readonly MealJournal? _journal;
@@ -65,19 +65,16 @@ public sealed class PipelineHost : BackgroundService
         _store = store;
         _log = log;
 
-        (_detector, var inspector) = DetectorFactory.Create(options.Detector);
-
         // The decision layer sits behind a console writer rather than replacing
         // it, same as Demo: the per-frame reading stays visible in the log.
-        IInspectionAction action = new ConsoleInspectionAction();
-        action = MealSinkFactory.Create(
-            action,
-            options.Meals,
-            options.Detector.ClassName,
+        // Program.LoadOptions has already refused any scenario but the bowls.
+        _scenario = Scenario.Create(
+            options,
+            new ConsoleInspectionAction(),
             AppContext.BaseDirectory,
             note => _log.LogInformation("Meals: {Note}", note));
 
-        _meals = action as MealEventSink;
+        _meals = _scenario.Sink as MealEventSink;
 
         if (_meals is not null)
         {
@@ -91,7 +88,7 @@ public sealed class PipelineHost : BackgroundService
             _storedMeals = _meals.Snapshot.MealsToday;
         }
 
-        var pipeline = new InspectionPipeline(_detector, inspector, action);
+        var pipeline = new InspectionPipeline(_scenario.Detector, _scenario.Inspector, _scenario.Action);
         _session = new InspectionSession(pipeline, new FrameWriter(options.Capture));
 
         // The only thing FrameObserver is still for. It runs on the capture
@@ -297,6 +294,6 @@ public sealed class PipelineHost : BackgroundService
         _meals?.Flush();
 
         _session.Dispose();
-        (_detector as IDisposable)?.Dispose();
+        _scenario.Dispose();
     }
 }

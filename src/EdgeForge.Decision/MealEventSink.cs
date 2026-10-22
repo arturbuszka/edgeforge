@@ -1,3 +1,4 @@
+using System.Globalization;
 using EdgeForge.Core;
 
 namespace EdgeForge.Decision;
@@ -28,7 +29,7 @@ namespace EdgeForge.Decision;
 /// reads it from the UI thread, so the few fields it touches are published through
 /// a lock.</para>
 /// </remarks>
-public sealed class MealEventSink : IInspectionAction
+public sealed class MealEventSink : IDecisionSink
 {
     private readonly IInspectionAction _inner;
     private readonly MealDetector _detector;
@@ -200,13 +201,11 @@ public sealed class MealEventSink : IInspectionAction
             if (detection.ClassName == _className) count++;
         }
 
-        // The frame's own timestamp would be better still, but InspectionResult
-        // does not carry it. Wall clock at the sink is within one frame of it on a
-        // live camera; a recorded file replays faster than real time and will read
-        // as a shorter meal. Noted in the README as a limitation of file replay,
-        // not worked around here - widening InspectionResult for it is a change to
-        // a core contract, and the live path is the one that matters.
-        var now = DateTimeOffset.UtcNow;
+        // The frame's scene time, stamped by the pipeline: for a camera the moment
+        // of capture, for a file its own clock, so a replay measures the meals the
+        // footage actually contains. A result built by hand - a test, an action
+        // called outside the pipeline - carries no timestamp, and gets "now".
+        var now = result.Timestamp == default ? DateTimeOffset.UtcNow : result.Timestamp;
 
         var meal = _detector.Observe(now, count);
         var feeding = _detector.IsFeeding;
@@ -246,6 +245,18 @@ public sealed class MealEventSink : IInspectionAction
         lock (_gate) _isFeeding = false;
 
         WriteStats(feeding: false, DateTimeOffset.UtcNow, force: true);
+    }
+
+    public IReadOnlyList<ReadoutLine> Readout()
+    {
+        var meals = Snapshot;
+        var today = meals.MealsToday.ToString(CultureInfo.InvariantCulture);
+
+        return
+        [
+            new ReadoutLine("Meals today", meals.IsFeeding ? $"{today} (eating now)" : today),
+            new ReadoutLine("Feeding today", meals.TotalDurationToday.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture))
+        ];
     }
 
     private void Record(MealEvent meal)

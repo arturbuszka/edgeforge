@@ -42,7 +42,10 @@ public sealed class InspectionPipeline
 
         stopwatch.Restart();
         var result = _inspector.Inspect(
-            frame, detections, inferenceLatency);
+            frame, detections, inferenceLatency) with
+        {
+            Timestamp = frame.SceneTime ?? frame.Timestamp
+        };
         stopwatch.Stop();
         var decisionLatency = stopwatch.Elapsed;
 

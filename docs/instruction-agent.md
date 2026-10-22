@@ -158,14 +158,18 @@ EdgeForge.Vision
 - LetterboxResize, BoxProjection, GpuAdapters
 - PresenceInspector      (is the target class in frame)
 - CountInspector         (count against an expected population; for the coop)
+- BlobDetector           (threshold + contour + fitted ellipse; measures in mm, no model)
 - SampleDetector, LabelInspector  (placeholders, kept for the no-model path)
-- DetectorFactory        (builds the detector/inspector pair from configuration)
+- DetectorFactory        (builds the detector from configuration: yolo or blob)
 
 EdgeForge.Runtime
 - InspectionPipeline
 - InspectionMetrics      (capture queue / inference / decision / action / total)
 - InspectionSession      (the capture loop, latest-wins publishing, buffer pooling)
 - FrameSnapshot, FrameWriter
+- Scenario               (assembles detector, per-frame rule and decision sink
+                         for the configured scenario; hosts never name one)
+- EdgeForgeConfiguration (the one options loader: appsettings, profile, local, env)
 - FrameBroadcaster       (encode once, fan out to many viewers, drop slow ones)
                          UNCALLED since MediaMTX took over video delivery.
                          Preserved on purpose, tests and all - do not delete it,
@@ -179,6 +183,10 @@ EdgeForge.Decision
 - StatsFile              (stats.json for the OBS overlay, written atomically)
 - MealEventSink          (IInspectionAction decorator wiring the above in)
 - MealSinkFactory
+- IDecisionSink          (what hosts see of any decision layer: Flush, Readout)
+- ItemTracker, LineCounter, ItemRule, ItemRuleInspector
+                         (line scenario: track items, one verdict each at the line)
+- LineEventSink, ItemJournal (verdict counters and the append-only items.jsonl)
 
 EdgeForge.Device
 - ConsoleInspectionAction
@@ -212,6 +220,23 @@ per-frame question, and EdgeForge.Decision debounces those readings into meal
 events: presence for longer than N seconds starts a meal, absence longer than M
 seconds ends it. Events are appended to meals.jsonl and summarised in stats.json,
 which an OBS Browser Source reads locally for the stream overlay.
+
+--------------------------------------------------
+SCENARIOS
+--------------------------------------------------
+
+Requested explicitly (2026-10-21): the core is a framework, and what it inspects
+is configuration. Two scenarios exist, both real:
+
+- bowls — presence debounced into meal events (the original installation)
+- line  — items on a belt, tracked, judged once at a decision line; eggs first,
+          via profiles/eggs.json (blob detector, width limit, reject classes)
+
+A profile (profiles/*.json, EDGEFORGE_PROFILE) points the system at a product.
+A new product on the line is a new profile. A new kind of question is a new
+case in Scenario plus a new IDecisionSink - never a change to the hosts.
+
+Do not add a third scenario speculatively. Add one when there is a scene for it.
 
 --------------------------------------------------
 TECHNOLOGY DIRECTION

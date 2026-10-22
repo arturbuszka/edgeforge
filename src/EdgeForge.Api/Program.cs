@@ -1,6 +1,7 @@
 using System.Net;
 using EdgeForge.Api;
 using EdgeForge.Core;
+using EdgeForge.Runtime;
 using EdgeForge.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -151,26 +152,17 @@ static string DatabasePath(StorageOptions storage) =>
 
 static EdgeForgeOptions LoadOptions()
 {
-    // The third copy of this in the repository, after Demo and Ui. Consolidating
-    // them means either a package reference in EdgeForge.Core - which has zero
-    // today, deliberately - or a fifth project. Both are worth doing; neither is
-    // worth folding into this change, where it would be untestable noise beside
-    // the parts that actually needed reviewing.
-    var configuration = new ConfigurationBuilder()
-        .SetBasePath(AppContext.BaseDirectory)
-        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-        // Gitignored overrides: camera credentials and machine-specific paths
-        // belong here, not in the tracked file above.
-        .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false)
-        .AddEnvironmentVariables("EDGEFORGE_")
-        .Build();
+    var options = EdgeForgeConfiguration.Load(AppContext.BaseDirectory);
 
-    var options = configuration.Get<EdgeForgeOptions>() ?? new EdgeForgeOptions();
-
-    if (options.Camera.Capacity < 1)
+    // The REST surface, the HUD and the SQLite mirror are all shaped around meal
+    // events. Serving the line from here means an item endpoint and a different
+    // HUD; until then, say so at startup rather than run a host that answers
+    // every question with zero.
+    if (options.Scenario != ScenarioNames.Bowls)
     {
         throw new InvalidOperationException(
-            $"Camera:Capacity must be at least 1, got {options.Camera.Capacity}.");
+            $"EdgeForge.Api serves the '{ScenarioNames.Bowls}' scenario only, got '{options.Scenario}'. " +
+            "Run EdgeForge.Ui or EdgeForge.Demo for the line.");
     }
 
     options.Meals.Validate();

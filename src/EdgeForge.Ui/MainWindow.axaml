@@ -133,6 +133,12 @@
                    Foreground="#3A4152" FontSize="15"
                    IsVisible="{Binding !HasVideo}" />
 
+        <!-- The decision line: where each item on the belt gets its one verdict. -->
+        <Canvas IsVisible="{Binding ShowDecisionLine}" IsHitTestVisible="False">
+          <Line StartPoint="{Binding DecisionLineStart}" EndPoint="{Binding DecisionLineEnd}"
+                Stroke="#FFD54F" StrokeThickness="2" StrokeDashArray="6,4" />
+        </Canvas>
+
         <ItemsControl ItemsSource="{Binding Boxes}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>

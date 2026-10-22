@@ -9,7 +9,6 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using EdgeForge.Core;
-using EdgeForge.Decision;
 using EdgeForge.Runtime;
 using EdgeForge.Vision;
 
@@ -23,8 +22,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly EdgeForgeOptions _options;
     private readonly InspectionSession _session;
     private readonly FrameWriter _writer;
-    private readonly IVisionDetector _detector;
-    private readonly MealEventSink? _meals;
+    private readonly Scenario _scenario;
+
+    // One row per readout label, created the first time the decision layer
+    // reports it: the line scenario adds a row per rejection reason as they occur.
+    private readonly Dictionary<string, StatRow> _readoutRows = new(StringComparer.Ordinal);
     private readonly RelayCommand _startCommand;
     private readonly RelayCommand _stopCommand;
     private readonly RelayCommand _snapshotCommand;
@@ -47,6 +49,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private IBrush _statusBrush = Brushes.Gray;
     private string _modelDescription = "";
     private int _pumpScheduled;
+    private Point _decisionLineStart;
+    private Point _decisionLineEnd;
 
     private long _processed;
     private long _ok;
@@ -59,11 +63,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _options = options;
         _source = options.Camera.Source;
-        // Create first, describe second: the description names the execution
-        // provider the session actually opened with, which is only known once it has.
-        (_detector, var inspector) = DetectorFactory.Create(options.Detector);
 
-        _modelDescription = DetectorFactory.Describe(options.Detector, _detector);
+        // The scenario decides detector, rule and decision layer; the viewer only
+        // supplies its own log as the innermost action. Created before describing:
+        // the description names the execution provider the session actually opened
+        // with, which is only known once it has.
+        _scenario = Scenario.Create(
+            options, new UiInspectionAction(LogFromWorker), AppContext.BaseDirectory, LogFromWorker);
+
+        _modelDescription = DetectorFactory.Describe(options.Detector, _scenario.Detector);
 
         _writer = new FrameWriter(options.Capture)
         {
@@ -71,26 +79,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         _autoSave = _writer.AutoSaveEnabled;
 
-        // Meal counting sits behind the viewer log rather than replacing it: the
-        // per-frame reading stays on screen, and meals are the separate question of
-        // what those readings add up to over time.
-        IInspectionAction action = new UiInspectionAction(LogFromWorker);
-        try
-        {
-            action = MealSinkFactory.Create(
-                action, options.Meals, options.Detector.ClassName,
-                AppContext.BaseDirectory, LogFromWorker);
-
-            _meals = action as MealEventSink;
-        }
-        catch (InvalidOperationException ex)
-        {
-            // A bad threshold disables meal counting; it must not stop the viewer
-            // from being usable for aiming the camera.
-            Log($"Meal counting off: {ex.Message}");
-        }
-
-        var pipeline = new InspectionPipeline(_detector, inspector, action);
+        var pipeline = new InspectionPipeline(_scenario.Detector, _scenario.Inspector, _scenario.Action);
 
         _session = new InspectionSession(pipeline, _writer);
         _session.SnapshotAvailable += OnSnapshotAvailable;
@@ -101,7 +90,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _stopCommand = new RelayCommand(() => _ = StopAsync(), () => IsRunning);
         _snapshotCommand = new RelayCommand(SaveSnapshot, () => IsRunning);
 
-        LiveStats = [CatsOnScreenStat, MaxCatsStat, MealsTodayStat, ConfidenceStat, ResolutionStat];
+        LiveStats = [CatsOnScreenStat, MaxCatsStat, ConfidenceStat, ResolutionStat];
         PerformanceStats =
         [
             FpsStat, CaptureLatencyStat, InferenceLatencyStat, DecisionLatencyStat,
@@ -111,9 +100,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _uptimeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _uptimeTimer.Tick += (_, _) => UptimeStat.Value = FormatUptime(_uptime.Elapsed);
 
-        Log($"Model: {_modelDescription}");
+        foreach (var line in _scenario.Describe(options)) Log(line);
         Log($"Captures: {_writer.Directory}");
-        Log($"Meals: {MealSinkFactory.Describe(options.Meals)}");
     }
 
     /// <summary>Raised on the UI thread once a new frame has reached the bitmap.</summary>
@@ -133,15 +121,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ICommand SnapshotCommand => _snapshotCommand;
 
-    // Live figures: what is in front of the camera right now.
+    // Live figures: what is in front of the camera right now. The decision
+    // layer's own figures - meals today, items judged - are appended after these
+    // from its readout, so the viewer never names a scenario.
     public StatRow CatsOnScreenStat { get; } = new("On screen");
     public StatRow MaxCatsStat { get; } = new("Most at once");
-    /// <summary>
-    /// The number the whole decision layer exists to produce, and the one destined
-    /// for the Twitch overlay. Meals at the bowls, not meals per cat - four cats
-    /// are not yet distinguishable from one another.
-    /// </summary>
-    public StatRow MealsTodayStat { get; } = new("Meals today");
 
     public StatRow ConfidenceStat { get; } = new("Best confidence");
     public StatRow ResolutionStat { get; } = new("Resolution");
@@ -226,6 +210,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetField(ref _modelDescription, value);
     }
 
+    /// <summary>Whether the scenario has a decision line to draw over the video.</summary>
+    public bool ShowDecisionLine => _scenario.Line is not null;
+
+    /// <summary>Decision line, in control coordinates; see <see cref="ProjectBoxes"/>.</summary>
+    public Point DecisionLineStart
+    {
+        get => _decisionLineStart;
+        private set => SetField(ref _decisionLineStart, value);
+    }
+
+    public Point DecisionLineEnd
+    {
+        get => _decisionLineEnd;
+        private set => SetField(ref _decisionLineEnd, value);
+    }
+
     /// <summary>
     /// Recomputes box positions. Called for every new frame and whenever the window
     /// resizes, because Uniform stretch moves the painted rectangle with the control.
@@ -255,8 +255,34 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 controlSize.Width,
                 controlSize.Height);
 
-            Boxes[i].Update(detections[i], projected);
+            Boxes[i].Update(detections[i], projected, _scenario.Rule);
         }
+
+        ProjectDecisionLine(snapshot, controlSize);
+    }
+
+    /// <summary>
+    /// Places the decision line over the painted frame. It is a degenerate box -
+    /// zero width across the belt, full height - so the same letterbox-aware
+    /// projection that places detections places the line.
+    /// </summary>
+    private void ProjectDecisionLine(FrameSnapshot snapshot, Size controlSize)
+    {
+        if (_scenario.Line is not { } line) return;
+
+        var at = line.DecisionLine;
+        var vertical = line.Direction is LineDirection.LeftToRight or LineDirection.RightToLeft;
+        var position = line.Direction is LineDirection.RightToLeft or LineDirection.BottomToTop ? 1 - at : at;
+
+        var box = vertical
+            ? new BoundingBox(position, 0, 0, 1)
+            : new BoundingBox(0, position, 1, 0);
+
+        var projected = BoxProjection.Project(
+            box, snapshot.Width, snapshot.Height, controlSize.Width, controlSize.Height);
+
+        DecisionLineStart = new Point(projected.X, projected.Y);
+        DecisionLineEnd = new Point(projected.X + projected.Width, projected.Y + projected.Height);
     }
 
     public async Task StopAsync()
@@ -399,13 +425,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (detection.Confidence > best) best = detection.Confidence;
         }
 
-        if (_meals is not null)
-        {
-            var meals = _meals.Snapshot;
-            MealsTodayStat.Value = meals.IsFeeding
-                ? $"{meals.MealsToday} (eating now)"
-                : meals.MealsToday.ToString(CultureInfo.InvariantCulture);
-        }
+        UpdateReadout();
 
         CatsOnScreenStat.Value = count.ToString(CultureInfo.InvariantCulture);
         MaxCatsStat.Value = _maxCats.ToString(CultureInfo.InvariantCulture);
@@ -432,6 +452,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SetStatus(status.Text, status.Brush);
     }
 
+    private void UpdateReadout()
+    {
+        if (_scenario.Sink is not { } sink) return;
+
+        foreach (var line in sink.Readout())
+        {
+            if (!_readoutRows.TryGetValue(line.Label, out var row))
+            {
+                row = new StatRow(line.Label);
+                _readoutRows[line.Label] = row;
+                LiveStats.Add(row);
+            }
+
+            row.Value = line.Value;
+        }
+    }
+
     private double Tick()
     {
         var now = Stopwatch.GetTimestamp();
@@ -451,9 +488,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _uptime.Stop();
             _uptimeTimer.Stop();
 
-            // A meal still in progress when capture stops is closed here; without
-            // it the visit is never counted and the day is short by one.
-            _meals?.Flush();
+            // Anything still in progress when capture stops is closed here - a meal
+            // at the bowls; without it the visit is never counted.
+            _scenario.Sink?.Flush();
+            UpdateReadout();
 
             Boxes.Clear();
             _current = null;
@@ -506,6 +544,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _uptimeTimer.Stop();
         _session.Dispose();
         _frameBitmap?.Dispose();
-        (_detector as IDisposable)?.Dispose();
+        _scenario.Dispose();
     }
 }
