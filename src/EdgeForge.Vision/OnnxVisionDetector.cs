@@ -108,10 +108,11 @@ public sealed class OnnxVisionDetector : IVisionDetector, IDisposable
 
             return (new InferenceSession(modelPath, options), $"directml:{gpuDeviceId}");
         }
-        catch (Exception ex) when (ex is OnnxRuntimeException or DllNotFoundException)
+        catch (Exception ex) when (ex is OnnxRuntimeException or DllNotFoundException or EntryPointNotFoundException)
         {
-            // No DX12 device, or the native DirectML.dll never made it next to the
-            // binary (see RuntimeIdentifier in the .csproj). Either way the CPU
+            // No DX12 device, the native DirectML.dll never made it next to the
+            // binary (see RuntimeIdentifier in the .csproj), or a non-Windows ORT
+            // build with no DirectML entry point at all. In each case the CPU
             // provider still answers.
             return (new InferenceSession(modelPath), "cpu");
         }

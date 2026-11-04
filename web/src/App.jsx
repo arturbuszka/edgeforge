@@ -25,7 +25,7 @@ export function App() {
     <main>
       {configError ? (
         <p className="notice">
-          Nie udało się pobrać konfiguracji z API ({configError}). Czy EdgeForge.Api działa?
+          Could not load configuration from the API ({configError}). Is EdgeForge.Api running?
         </p>
       ) : (
         <Player config={config} />

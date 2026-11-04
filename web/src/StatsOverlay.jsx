@@ -38,24 +38,24 @@ export function StatsOverlay({ stats, connected, stale, now }) {
       <div className="hud-corner top-left">
         <div className="card hero">
           <span className="count">{mealsToday}</span>
-          <span className="label">posiłki dziś</span>
+          <span className="label">meals today</span>
         </div>
 
         <div className={`card pill${feeding ? ' feeding' : ''}`}>
           <span className="dot" />
-          <span>{feeding ? 'je teraz' : 'przy miskach pusto'}</span>
+          <span>{feeding ? 'eating now' : 'bowls empty'}</span>
           {feedingFor !== null && <span className="mono">{duration(feedingFor)}</span>}
         </div>
       </div>
 
       <div className="hud-corner top-right">
         <div className="card stat">
-          <span className="label">łącznie dziś</span>
+          <span className="label">total today</span>
           <span className="mono">{duration(stats?.totalFeedingSecondsToday ?? 0)}</span>
         </div>
 
         <div className="card stat">
-          <span className="label">na obrazie</span>
+          <span className="label">in frame</span>
           {/* null and 0 are different facts: "no cats" versus "nothing is
               looking". Showing a confident 0 for a stopped pipeline would be a
               lie the HUD tells convincingly. */}
@@ -67,9 +67,9 @@ export function StatsOverlay({ stats, connected, stale, now }) {
         <div className="card status">
           <span className={`dot${connected && !stale ? ' ok' : ''}`} />
           <span>
-            {!connected ? 'brak połączenia z API' : stale ? 'dane nieaktualne' : 'na żywo'}
+            {!connected ? 'API disconnected' : stale ? 'data stale' : 'live'}
           </span>
-          {connected && !pipelineRunning && <span className="warn">pipeline zatrzymany</span>}
+          {connected && !pipelineRunning && <span className="warn">pipeline stopped</span>}
         </div>
       </div>
     </div>

@@ -157,7 +157,7 @@ The browser gets the stream over WHEP — one HTTP POST carrying an SDP offer, o
 201 carrying the answer. The failure mode worth knowing about is ICE: a container
 behind NAT advertises an address the browser cannot route to, signalling succeeds,
 and the video stays black with nothing in the logs to say why. `MTX_WEBRTC_HOST`
-in `.env` is the fix; the README has the three cases.
+in `.env` is the fix; [operations.md](operations.md) has the three cases.
 
 ### What this replaced
 
@@ -168,11 +168,8 @@ block, never let a `Mat` cross into an async handler. But it put a 15-30 ms enco
 next to a ~41 ms inference budget and made the .NET process responsible for
 delivering video.
 
-It is still in `EdgeForge.Runtime`, uncalled and still covered by its tests, kept
-against the day .NET itself needs to record a clip. Nothing on the live-view path
-constructs it. The HLS future this section once reserved for "a third subscriber
-piping `EncodedFrame` to ffmpeg" is served better by MediaMTX, which does it
-natively.
+It was removed once MediaMTX took over; git history has it if .NET ever needs to
+record a clip itself.
 
 ## Storage
 

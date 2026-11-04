@@ -15,7 +15,7 @@ services:
       # From .env, which is gitignored. Never inline the URL here - it carries
       # the camera's admin password in the userinfo field.
       MTX_CAMERA_URL: ${MTX_CAMERA_URL:?set MTX_CAMERA_URL in .env - copy .env.example}
-      # See "The NAT problem" in the README. Without this, WebRTC negotiates a
+      # See "MTX_WEBRTC_HOST" in docs/operations.md. Without this, WebRTC negotiates a
       # container address (172.x) the browser cannot route to, and video never
       # starts while every log line reports success.
       MTX_WEBRTCADDITIONALHOSTS: ${MTX_WEBRTC_HOST:-127.0.0.1}
