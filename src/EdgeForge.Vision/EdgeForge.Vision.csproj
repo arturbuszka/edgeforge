@@ -12,7 +12,13 @@
          DirectML build - the CPU package is further ahead, but that is the whole
          cost of a ~4x speedup here. The CPU provider still ships inside it and is
          what DetectorOptions.ExecutionProvider="cpu" falls back to. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4"
+                      Condition="'$(OS)' == 'Windows_NT'" />
+    <!-- The DirectML package carries native binaries for Windows only. Everywhere
+         else the stock package supplies the same managed API and the CPU provider,
+         and the detector's DirectML request falls back to it. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.4"
+                      Condition="'$(OS)' != 'Windows_NT'" />
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
     <!-- Managed bindings alone are not enough: without a native runtime package
          VideoCapture throws DllNotFoundException. Versions must match exactly. -->
