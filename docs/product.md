@@ -8,9 +8,8 @@ The first installation is a nine-hen coop. This is not a poultry product. It is 
 1:9 scale factory: a real physical process, running continuously, that we do not
 have to ask anyone's permission to instrument.
 
-The coop gives us what a slide deck cannot — a system that has been running for
-weeks against real light, real motion and real failure modes before we ever walk
-into a plant.
+The coop gives us what a slide deck cannot — a system exposed to real light, real
+motion and real failure modes before we ever walk into a plant.
 
 ## Initial wedge
 

@@ -1,7 +1,8 @@
 # Demo plan
 
-The demo is not a slideshow about edge AI. It is a machine that has been running
-in a coop for weeks, shown live.
+The demo is not a slideshow about edge AI. It is a machine running in a real coop,
+shown live. The script below is the target: flock counting and zones (steps 3-7)
+are V1 and not built yet.
 
 ## 90 seconds
 
@@ -25,12 +26,12 @@ in a coop for weeks, shown live.
 
 | Stage | Content | Status |
 | ----- | ------- | ------ |
-| V0 | camera + recording + detect hens | detector still a placeholder |
+| V0 | camera + recording + detect hens | DONE: real capture and local YOLO detection |
 | V1 | tracking per hen, counting, zones | |
 | V2 | event history, temperature/humidity | event history DONE (meals.jsonl + SQLite); sensors outstanding |
 | V3 | feeding / drinking / egg events | |
 | V4 | alerts, anomaly detection | |
-| V5 | same architecture on one production line | |
+| V5 | same architecture on one production line | built and verified on synthetic video (`line` scenario); not yet on a real belt |
 
 The live view — MediaMTX, `EdgeForge.Api` and the React page — is not a roadmap
 item. It is a household side surface, built because someone wanted to watch the
