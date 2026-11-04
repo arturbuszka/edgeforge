@@ -27,8 +27,7 @@ Read [docs/architecture.md](docs/architecture.md) before changing structure and
 
 - Journals (`meals.jsonl`, `items.jsonl`) are the source of truth. SQLite is a
   rebuildable view: put nothing there that is not in the journal.
-- Video goes through MediaMTX, never through .NET. `FrameBroadcaster` is preserved
-  on purpose: do not delete it, and do not wire it back into the live view.
+- Video goes through MediaMTX, never through .NET.
 - `EdgeForge.Api` and `web/` are one local page, not the product direction. Do not
   add accounts, authentication, cloud exposure or dashboards to them.
 
