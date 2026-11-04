@@ -60,11 +60,11 @@ export function Player({ config }) {
           silently never starts, with nothing in the console to say why. */}
       <video ref={video} autoPlay muted playsInline />
 
-      {mode === 'connecting' && <p className="notice">Łączenie ze strumieniem…</p>}
+      {mode === 'connecting' && <p className="notice">Connecting to the stream…</p>}
       {mode === 'failed' && (
         <p className="notice">
-          Brak obrazu. Sprawdź, czy MediaMTX działa i czy MTX_WEBRTC_HOST wskazuje
-          adres, pod którym ta przeglądarka go widzi.
+          No video. Check that MediaMTX is running and that MTX_WEBRTC_HOST is the
+          address this browser reaches it on.
         </p>
       )}
     </div>
